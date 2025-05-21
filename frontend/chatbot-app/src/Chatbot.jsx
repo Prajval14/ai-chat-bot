@@ -28,7 +28,7 @@ export default function Chatbot({ botName, botIcon, botColor }) {
     }
   }, [loading, open]);
 
-  // Log chat history to backend
+  // Log chat history
   async function logChat(loggedMessages) {
     try {
       await fetch(`${apiBase}/log`, {
