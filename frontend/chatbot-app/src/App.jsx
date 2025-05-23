@@ -5,6 +5,8 @@ const BOT_NAME = import.meta.env.VITE_BOT_NAME;
 const BOT_ICON = import.meta.env.VITE_BOT_ICON;
 const BOT_COLOR = import.meta.env.VITE_BOT_COLOR;
 
+console.log(BOT_COLOR);
+
 function App() {
   return (
     <div>
