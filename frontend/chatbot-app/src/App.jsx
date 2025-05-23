@@ -5,12 +5,10 @@ const BOT_NAME = import.meta.env.VITE_BOT_NAME;
 const BOT_ICON = import.meta.env.VITE_BOT_ICON;
 const BOT_COLOR = import.meta.env.VITE_BOT_COLOR;
 
-console.log(BOT_COLOR, BOT_NAME);
-
 function App() {
   return (
     <div>
-      <Chatbot botName={BOT_NAME} botIcon={BOT_ICON} botColor={BOT_COLOR} />
+      <Chatbot botName={BOT_NAME} botIcon={"https://thumbs.dreamstime.com/b/robot-icon-chat-bot-sign-support-service-concept-chatbot-character-flat-style-robot-icon-chat-bot-sign-support-service-121644324.jpg"} botColor={BOT_COLOR} />
     </div>
   );
 }
