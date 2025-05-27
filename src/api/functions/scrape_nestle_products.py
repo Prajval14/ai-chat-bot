@@ -1,30 +1,16 @@
-# === Import Libraries and Set Up Logging ===
 from playwright.sync_api import sync_playwright
 import json
 import re
 import time
 import os
-import logging
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# === Environment and Logging Setup ===
 load_dotenv()
-logger = logging.getLogger()
-if not logger.hasHandlers():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.FileHandler("backend_chatbot.log", encoding="utf-8"), logging.StreamHandler()]
-    )
-
-# === Blob Storage Setup ===
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob="nestle_products.txt")
-
-# === Product Scraping Functions ===
 
 def get_total_pages(page):
     try:
@@ -33,10 +19,9 @@ def get_total_pages(page):
         match = re.search(r'page=(\d+)', href)
         if match:
             total_pages = int(match.group(1))
-            logger.info(f"Total pages found: {total_pages}")
             return total_pages
     except Exception as e:
-        logger.info("Error extracting total pages:", e)
+        pass
     return 0
 
 def get_product_urls(page):
@@ -47,7 +32,7 @@ def get_product_urls(page):
         a = anchors.nth(i)
         url = a.get_attribute('href')
         heading = a.inner_text().strip()
-        if url and heading:  # Only include products with a heading
+        if url and heading:
             if not url.startswith("http"):
                 url = "https://www.madewithnestle.ca" + url
             products.append({"url": url, "heading": heading})
@@ -60,31 +45,24 @@ def scrape_all_product_urls():
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
         page = context.new_page()
-
         base_url = "https://www.madewithnestle.ca/search/products?t=&page="
         start_url = base_url + "0"
-        logger.info(f"Loading first page: {start_url}")
         page.goto(start_url, wait_until='domcontentloaded')
         time.sleep(2)
 
         total_pages = get_total_pages(page)
         if total_pages == 0:
-            logger.info("Could not find total pages, defaulting to only first page.")
             total_pages = 0
 
-        total_pages = min(total_pages, 0)  # Limit to 0 for just first page (change as needed)
+        total_pages = min(total_pages, 0)
 
         all_products = []
         for i in range(0, total_pages + 1):
             page_url = base_url + str(i)
-            logger.info(f"Scraping page {i+1}/{total_pages+1}: {page_url}")
             page.goto(page_url, wait_until='domcontentloaded')
             time.sleep(1)
             products = get_product_urls(page)
-            logger.info(f"  Found {len(products)} products on this page.")
             all_products.extend(products)
-
-        logger.info(f"\nTotal product entries scraped: {len(all_products)}")
         browser.close()
         return all_products
 
@@ -209,7 +187,6 @@ def extract_nutrition_info(page):
             lines.append(main_str)
         return "\n".join(lines) if lines else None
     except Exception as e:
-        logger.info("Error extracting nutrition info:", e)
         return None
 
 def extract_ingredients(page):
@@ -245,12 +222,10 @@ def scrape_all_product_details(product_entries):
         for idx, prod in enumerate(product_entries):
             url = prod["url"]
             heading = prod["heading"]
-            logger.info(f"[{idx+1}/{len(product_entries)}] Scraping: {url}")
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=25000)
                 time.sleep(1)
             except Exception as e:
-                logger.info(f"Failed to load {url}: {e}")
                 continue
 
             product = {"url": url, "heading": heading}
@@ -268,7 +243,6 @@ def scrape_all_product_details(product_entries):
             if ingred:
                 product['ingredients'] = ingred
 
-            logger.info("  Sections found: %s", list(product.keys()))
             results.append(product)
         browser.close()
     return results
@@ -282,7 +256,6 @@ def product_to_paragraph(product):
     if product.get('description'):
         lines.append(f"Description: {product['description']}")
     if product.get('features_and_benefits'):
-        # Features may be a list or string
         feats = product['features_and_benefits']
         if isinstance(feats, list):
             lines.append(f"Features and Benefits: {', '.join(feats)}")
@@ -294,26 +267,15 @@ def product_to_paragraph(product):
         lines.append(f"Ingredients: {product['ingredients']}")
     return "\n".join(lines) + "\n\n"
 
-# === Main Method ===
 def main():
     try:
         products = scrape_all_product_urls()
-        products = products[:1]  # LIMIT: Only process the first product for quick testing. COMMENT OUT IN PROD
-        logger.info(f"Found {len(products)} product URLs. Extracting details...\n")
+        products = products[:1]
         details = scrape_all_product_details(products)
         paragraphs = [product_to_paragraph(prod) for prod in details]
         full_text = "".join(paragraphs)
-
-        # Save to blob as txt
         blob_client.upload_blob(full_text, overwrite=True)
-        logger.info("Uploaded all product details as TXT paragraphs to Azure Blob Storage.")
-
-        # (Optional: Save locally for debug)
-        # with open("nestle_products.txt", "w", encoding="utf-8") as f:
-        #     f.write(full_text)
-
     except Exception as e:
-        logger.error(f"Error in main scraping: {e}")
         raise
 
 if __name__ == "__main__":

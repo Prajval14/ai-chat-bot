@@ -1,6 +1,4 @@
-# === Import Libraries and Set Up Logging ===
 import os
-import logging
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 from dotenv import load_dotenv, set_key
@@ -10,29 +8,13 @@ load_dotenv(ENV_PATH)
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from functions.vector_rag import query_vector_rag
-# from azure.search.documents.models import Vector
-
 from openai import OpenAI
 
-# === Initialize Logging ===
-LOG_FILENAME = "backend_chatbot.log"
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILENAME, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-
-# === Load Environment Variables ===
 load_dotenv()
 
-# === Flask Application Initialization ===
 app = Flask(__name__)
 CORS(app)
 
-# === Global State for Credentials and Mode Selection ===
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
@@ -48,7 +30,6 @@ def select_rag_mode():
     global rag_mode, search_client
     if NEO4J_URI and NEO4J_USERNAME and NEO4J_PASSWORD:
         rag_mode = "graph"
-        logging.info("GraphRAG mode selected (Neo4j credentials detected)")
     elif AZURE_SEARCH_ENDPOINT and AZURE_SEARCH_KEY:
         rag_mode = "vector"
         search_client = SearchClient(
@@ -56,12 +37,9 @@ def select_rag_mode():
             index_name=INDEX_NAME,
             credential=AzureKeyCredential(AZURE_SEARCH_KEY)
         )
-        logging.info("VectorRAG mode selected (Azure Search credentials detected)")
     else:
         rag_mode = None
-        logging.error("No valid RAG credentials found in environment variables.")
 
-# === Data Scraping Step ===
 def run_scraping_jobs():
     try:
         from functions import scrape_nestle_products
@@ -70,46 +48,34 @@ def run_scraping_jobs():
         scrape_nestle_products.main()
         scrape_nestle_recipes.main()
 
-        logging.info("Scraping jobs completed successfully.")
         return True
     except Exception as e:
-        logging.error(f"Error in scraping jobs: {e}")
         return False
 
-# === File Processing Step ===
 def run_file_processing():
     try:
         from functions import file_processing
         file_processing.main()
-        logging.info("File processing completed successfully.")
         return True
     except Exception as e:
-        logging.error(f"Error in file processing: {e}")
         return False
 
-# === VectorRAG Indexing Step ===
 def run_vector_rag_indexing():
     try:
         from functions import vector_rag
         vector_rag.main()
-        logging.info("Vector RAG indexing completed successfully.")
         return True
     except Exception as e:
-        logging.error(f"Error in Vector RAG indexing: {e}")
         return False
 
-# === GraphRAG Indexing Step ===
 def run_graph_rag_indexing():
     try:
-        from functions import graph_rag_indexing
-        graph_rag_indexing.main()
-        logging.info("Graph RAG indexing completed successfully.")
+        from src.api.functions import graph_rag
+        graph_rag.main()
         return True
     except Exception as e:
-        logging.error(f"Error in Graph RAG indexing: {e}")
         return False
 
-# === Embedding Function for VectorRAG ===
 def generate_embeddings(text):
     response = openai_client.embeddings.create(
         input=text,
@@ -117,7 +83,6 @@ def generate_embeddings(text):
     )
     return response.data[0].embedding
 
-# === GraphRAG Query Function ===
 def graph_rag_query(user_message):
     try:
         from langchain_openai import ChatOpenAI
@@ -125,7 +90,7 @@ def graph_rag_query(user_message):
         from langchain.prompts import PromptTemplate
         from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 
-        llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=OPENAI_API_KEY)
+        llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=os.getenv("OPENAI_API_KEY"))
         graph = Neo4jGraph(
             url=NEO4J_URI,
             username=NEO4J_USERNAME,
@@ -159,15 +124,12 @@ def graph_rag_query(user_message):
         result = qa.invoke({"query": user_message})
         return result['result']
     except Exception as e:
-        logging.error(f"Error in GraphRAG querying: {e}")
         return "Sorry, something went wrong with the graph-based query."
 
-# === Root Endpoint ===
 @app.route("/")
 def home():
     return jsonify({"message": "Hello from your Flask backend!"})
 
-# === Initialization Endpoint ===
 @app.route("/init", methods=["POST"])
 def init():
     select_rag_mode()
@@ -206,16 +168,12 @@ def edit_bot_config():
     icon = data.get('bot_icon', '')
     color = data.get('bot_color', '')
 
-    # Optionally, sanitize/check input here
-
     os.environ['BOT_NAME'] = name
     os.environ['BOT_ICON'] = icon
     os.environ['BOT_COLOR'] = color
     set_key(ENV_PATH, 'BOT_NAME', name)
     set_key(ENV_PATH, 'BOT_ICON', icon)
     set_key(ENV_PATH, 'BOT_COLOR', color)
-
-    logging.info(f"Bot config updated: name={name}, icon={icon}, color={color}")
 
     return jsonify({
         "status": "success",
@@ -224,7 +182,6 @@ def edit_bot_config():
         "bot_color": color
     }), 200
 
-# === Chat Endpoint ===
 @app.route("/chat", methods=["POST"])
 def chat():
     select_rag_mode()
@@ -240,13 +197,10 @@ def chat():
             answer = query_vector_rag(user_message, INDEX_NAME)
         return jsonify({"answer": answer})
     except Exception as e:
-        logging.error(f"Error in chat endpoint: {e}")
         return jsonify({"status": "error", "message": "Failed to generate answer."}), 500
 
-# === Start Flask Application ===
 if __name__ == "__main__":
     select_rag_mode()
     if not rag_mode:
-        logging.error("No valid RAG credentials found. Exiting app startup.")
         exit(1)
     app.run(debug=False, host="0.0.0.0")

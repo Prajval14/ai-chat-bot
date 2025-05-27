@@ -1,29 +1,15 @@
-# === Import Libraries and Set Up Logging ===
 from playwright.sync_api import sync_playwright
 import re
 import time
 import os
-import logging
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# === Environment and Logging Setup ===
 load_dotenv()
-logger = logging.getLogger()
-if not logger.hasHandlers():
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s [%(levelname)s] %(message)s",
-        handlers=[logging.FileHandler("backend_chatbot.log", encoding="utf-8"), logging.StreamHandler()]
-    )
-
-# === Blob Storage Setup ===
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob="nestle_recipes.txt")
-
-# === Recipe Scraping Functions ===
 
 def get_total_pages(page):
     try:
@@ -32,10 +18,9 @@ def get_total_pages(page):
         match = re.search(r'page=(\d+)', href)
         if match:
             total_pages = int(match.group(1))
-            logger.info(f"Total pages found: {total_pages}")
             return total_pages
     except Exception as e:
-        logger.info("Error extracting total pages: %s", e)
+        pass
     return 0
 
 def get_recipe_urls(page):
@@ -85,31 +70,22 @@ def collect_recipe_urls():
             locale='en-US'
         )
         page = context.new_page()
-
         base_url = "https://www.madewithnestle.ca/search/recipes?t=&page="
         start_url = base_url + "0"
-        logger.info(f"Loading first page: {start_url}")
         page.goto(start_url, wait_until='domcontentloaded')
         time.sleep(2)
-
         total_pages = get_total_pages(page)
         if total_pages == 0:
-            logger.info("Could not find total pages, defaulting to only first page.")
             total_pages = 0
-        total_pages = min(total_pages, 0)  # Only first page for now
-
+        total_pages = min(total_pages, 0)
         all_urls = []
         for i in range(0, total_pages + 1):
             page_url = base_url + str(i)
-            logger.info(f"Scraping page {i+1}/{total_pages+1}: {page_url}")
             page.goto(page_url, wait_until='domcontentloaded')
             time.sleep(1)
             urls = get_recipe_urls(page)
-            logger.info(f"  Found {len(urls)} recipe URLs on this page.")
             all_urls.extend(urls)
-
         browser.close()
-        logger.info(f"\nTotal recipe URLs scraped: {len(all_urls)}")
         return all_urls
 
 def scrape_recipe_details(urls):
@@ -122,18 +98,14 @@ def scrape_recipe_details(urls):
             locale='en-US'
         )
         for idx, url in enumerate(urls):
-            logger.info(f"\n[{idx+1}/{len(urls)}] Visiting: {url}")
             try:
                 recipe_page = context.new_page()
                 response = recipe_page.goto(url, wait_until='domcontentloaded', timeout=30000)
-                logger.info(f"Recipe page status: {getattr(response, 'status', 'unknown')}")
                 if hasattr(response, 'status') and response.status == 403:
-                    logger.info("Got 403 Forbidden on recipe page. Skipping.")
                     recipe_page.close()
                     continue
                 time.sleep(2)
             except Exception as e:
-                logger.info(f"Error loading recipe page: {e}")
                 continue
 
             title = extract_text(recipe_page, 'h1.coh-heading.global-recipe-title')
@@ -148,7 +120,6 @@ def scrape_recipe_details(urls):
                 instructions = extract_all_text(recipe_page, ".coh-paragraph")
             tags = extract_all_text(recipe_page, ".field--name-field-recipe-tag-free-tag .field__item a")
             tip = extract_tip(recipe_page)
-
             recipe_data = {
                 "title": title,
                 "link": url,
@@ -200,15 +171,12 @@ def recipe_to_paragraph(recipe):
 def main():
     try:
         all_urls = collect_recipe_urls()
-        urls = all_urls[:1]  # LIMIT: Only process the first recipe for quick testing. COMMENT OUT OR INCREASE FOR PROD
-        logger.info(f"Processing {len(urls)} recipe URLs for scraping details...\n")
+        urls = all_urls[:1]
         recipes = scrape_recipe_details(urls)
         paragraphs = [recipe_to_paragraph(recipe) for recipe in recipes]
         full_text = "".join(paragraphs)
         blob_client.upload_blob(full_text, overwrite=True)
-        logger.info("Uploaded all recipe details as TXT paragraphs to Azure Blob Storage.")
     except Exception as e:
-        logger.error(f"Error in main scraping: {e}")
         raise
 
 if __name__ == "__main__":

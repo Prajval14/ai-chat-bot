@@ -41,7 +41,6 @@ function App() {
     fetchBotConfig();
   }, []);
 
-  // Pick icon (frontend fallback if config value is missing or empty)
   const resolvedBotIcon =
     botConfig.bot_icon && botConfig.bot_icon.trim() !== ""
       ? botConfig.bot_icon

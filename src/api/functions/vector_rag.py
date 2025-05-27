@@ -1,7 +1,6 @@
 import os
 import json
 import uuid
-import logging
 from dotenv import load_dotenv
 
 from azure.core.credentials import AzureKeyCredential
@@ -20,19 +19,6 @@ from azure.search.documents.indexes.models import (
 )
 from openai import OpenAI
 
-# === Global Logging ===
-LOG_FILENAME = "backend_chatbot.log"
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler(LOG_FILENAME, encoding="utf-8"),
-        logging.StreamHandler()
-    ]
-)
-logger = logging.getLogger(__name__)
-
-# === Load ENV ===
 load_dotenv()
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
@@ -42,20 +28,16 @@ CHUNKED_JSON_BLOB = os.getenv("CHUNKED_JSON_BLOB", "chunked_nestle.json")
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def download_blob_to_string(blob_name):
-    logger.info(f"Attempting to download blob: {blob_name}")
     blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
     blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob=blob_name)
     blob_data = blob_client.download_blob().readall()
-    logger.info(f"Downloaded blob: {blob_name}")
     return blob_data.decode("utf-8")
 
-# --- INDEXING PHASE ---
 def create_vector_index():
-    logger.info("Starting vector index creation.")    
     index_name = "nestledata"
     fields = [
         SimpleField(name="documentId", type=SearchFieldDataType.String, filterable=True, sortable=True, key=True),
-        SearchableField(name="content", type=SearchFieldDataType.String),        
+        SearchableField(name="content", type=SearchFieldDataType.String),
         SimpleField(name="type", type=SearchFieldDataType.String, filterable=True),
         SimpleField(name="chunk_id", type=SearchFieldDataType.Int32, filterable=True, sortable=True),
         SearchableField(name="title", type=SearchFieldDataType.String),
@@ -85,26 +67,21 @@ def create_vector_index():
     client = SearchIndexClient(AZURE_SEARCH_ENDPOINT, AzureKeyCredential(AZURE_SEARCH_KEY))
     try:
         result = client.create_index(index)
-        logger.info(f"Created Azure Cognitive Search vector index: {index_name}")
     except Exception as e:
-        logger.error(f"Could not create index (might exist): {e}")
+        pass
     return index_name
 
 def generate_embeddings(text):
-    logger.info("Generating embeddings for chunk...")
     response = openai_client.embeddings.create(
         input=text,
         model="text-embedding-ada-002"
     )
     embedding = response.data[0].embedding
-    logger.info("Embeddings generated.")
     return embedding
 
 def ingest_docs_to_index(chunked_blob_name, index_name):
-    logger.info("Starting document ingestion to index.")
     chunked_json_str = download_blob_to_string(chunked_blob_name)
     docs_data = json.loads(chunked_json_str)
-
     docs = []
     for doc in docs_data:
         try:
@@ -118,27 +95,16 @@ def ingest_docs_to_index(chunked_blob_name, index_name):
                     "url": doc.get("url", "")
             })
         except Exception as e:
-            logger.error(f"Embedding failed for a chunk: {e}")
-
-    logger.info(f"Prepared {len(docs)} documents for upload to Azure Cognitive Search.")
-
-    # Upload docs
+            pass
     search_client = SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=index_name, credential=AzureKeyCredential(AZURE_SEARCH_KEY))
     try:
         result = search_client.upload_documents(docs)
-        logger.info("Documents uploaded to vector index.")
     except Exception as e:
-        logger.error(f"Failed to upload documents: {e}")
+        pass
 
-# --- QUERY PHASE ---
 def query_vector_rag(query, index_name):
-    logger.info(f"Starting RAG query for: {query}")
     search_client = SearchClient(endpoint=AZURE_SEARCH_ENDPOINT, index_name=index_name, credential=AzureKeyCredential(AZURE_SEARCH_KEY))
-
-    # Step 1: Create embedding for query
     query_embedding = generate_embeddings(query)
-    logger.info(f"Query embedding length: {len(query_embedding)}")
-    # Step 2: Search similar vectors
     vector = Vector(value=query_embedding, k=5, fields="embedding")
     results = search_client.search(
         search_text=None,
@@ -147,13 +113,8 @@ def query_vector_rag(query, index_name):
     )
     input_text = ""
     for result in results:
-        logger.info(f"Retrieved doc chunk: {result['content'][:120]}") 
         if result.get('type') == 'recipe':
-            input_text += "\n\n---\n\n" + result['content'] 
-    print(f"Retrieved context:\n{input_text}\n")
-    logger.info("Context chunks retrieved for query.")
-
-    # Step 3: Call LLM
+            input_text += "\n\n---\n\n" + result['content']
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
@@ -169,18 +130,8 @@ def query_vector_rag(query, index_name):
         temperature=0
     )
     answer = response.choices[0].message.content
-    logger.info(f"LLM response generated: {answer}")
     return answer
 
-# === MAIN ===
 if __name__ == "__main__":
-    logger.info("Starting RAG indexing and querying workflow.")
-
     index_name = create_vector_index()
     ingest_docs_to_index(CHUNKED_JSON_BLOB, index_name)
-
-    # # Example query
-    # user_query = "How many total brands does nestle have?"
-    # answer = query_vector_rag(user_query, index_name)
-    # print("Answer:", answer)
-    logger.info("Completed full workflow.")
