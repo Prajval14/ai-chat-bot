@@ -89,8 +89,8 @@ def run_file_processing():
 # === VectorRAG Indexing Step ===
 def run_vector_rag_indexing():
     try:
-        from functions import vector_rag_indexing
-        vector_rag_indexing.main()
+        from functions import vector_rag
+        vector_rag.main()
         logging.info("Vector RAG indexing completed successfully.")
         return True
     except Exception as e:
@@ -112,7 +112,7 @@ def run_graph_rag_indexing():
 def generate_embeddings(text):
     response = openai_client.embeddings.create(
         input=text,
-        model="text-embedding-3-small"
+        model="text-embedding-ada-002"
     )
     return response.data[0].embedding
 

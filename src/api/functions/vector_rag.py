@@ -18,7 +18,7 @@ from azure.search.documents.indexes.models import (
     SearchIndex,
     HnswVectorSearchAlgorithmConfiguration
 )
-import openai
+from openai import OpenAI
 
 # === Global Logging ===
 LOG_FILENAME = "backend_chatbot.log"
@@ -34,12 +34,12 @@ logger = logging.getLogger(__name__)
 
 # === Load ENV ===
 load_dotenv()
-openai.api_key = os.getenv("OPENAI_API_KEY")
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 CHUNKED_JSON_BLOB = os.getenv("CHUNKED_JSON_BLOB", "chunked_nestle.json")
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def download_blob_to_string(blob_name):
     logger.info(f"Attempting to download blob: {blob_name}")
@@ -51,7 +51,14 @@ def download_blob_to_string(blob_name):
 
 # --- INDEXING PHASE ---
 def create_vector_index():
-    logger.info("Starting vector index creation.")
+    logger.info("Starting vector index creation.")    
+    index_name = "nestledata"
+    fields = [
+        SimpleField(name="documentId", type=SearchFieldDataType.String, filterable=True, sortable=True, key=True),
+        SearchableField(name="content", type=SearchFieldDataType.String),
+        SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), searchable=True,
+                    vector_search_dimensions=1536, vector_search_configuration="my-vector-config", vector_search_profile_name="my-vector-profile")
+    ]
     vector_search = VectorSearch(
         algorithm_configurations=[
             HnswVectorSearchAlgorithmConfiguration(
@@ -66,13 +73,6 @@ def create_vector_index():
             )
         ]
     )
-    index_name = "nestledata"
-    fields = [
-        SimpleField(name="documentId", type=SearchFieldDataType.String, filterable=True, sortable=True, key=True),
-        SearchableField(name="content", type=SearchFieldDataType.String),
-        SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), searchable=True,
-                    vector_search_dimensions=1536, vector_search_configuration="my-vector-config", vector_search_profile_name="my-vector-profile")
-    ]
     index = SearchIndex(
         name=index_name,
         fields=fields,
@@ -88,9 +88,9 @@ def create_vector_index():
 
 def generate_embeddings(text):
     logger.info("Generating embeddings for chunk...")
-    response = openai.Embedding.create(
-        model="text-embedding-ada-002",
-        input=text
+    response = openai_client.Embedding.create(
+        input=text,
+        model="text-embedding-ada-002"
     )
     embedding = response["data"][0]["embedding"]
     logger.info("Embeddings generated.")
@@ -144,7 +144,7 @@ def query_vector_rag(query, index_name):
     logger.info("Context chunks retrieved for query.")
 
     # Step 3: Call LLM
-    response = openai.ChatCompletion.create(
+    response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You are a helpful assistant. Use ONLY the provided context to answer the question. If you cannot find the answer in the context, say: 'The answer is not in the context provided."},

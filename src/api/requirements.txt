@@ -2,4 +2,5 @@ flask
 flask-cors
 python-dotenv
 azure-search-documents==11.4.0b8
+azure-storage-blob
 openai
