@@ -9,6 +9,7 @@ load_dotenv(ENV_PATH)
 
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
+from functions.vector_rag import query_vector_rag
 # from azure.search.documents.models import Vector
 
 from openai import OpenAI
@@ -115,38 +116,6 @@ def generate_embeddings(text):
         model="text-embedding-ada-002"
     )
     return response.data[0].embedding
-
-# === VectorRAG Query Function ===
-def vector_rag_query(user_message, search_client):
-    # 1. Generate embedding for user query
-    query_embedding = generate_embeddings(user_message)
-
-    # 2. Vector search with latest SDK (using dict format for vectors parameter)
-    results = search_client.search(
-        search_text=None,
-        vectors=[{
-            "value": query_embedding,
-            "k": 2,
-            "fields": "embedding"
-        }],
-        select=["content"]
-    )
-
-    # 3. Concatenate search results
-    input_text = " ".join(result['content'] for result in results if 'content' in result)
-
-    # 4. Call OpenAI with RAG context
-    response = openai_client.chat.completions.create(
-        model="gpt-4o-mini",
-        messages=[
-            {"role": "system", "content": "You are a helpful assistant. Use the provided context to answer questions."},
-            {"role": "user", "content": f"Context: {input_text}\n\nQuestion: {user_message}"}
-        ],
-        max_tokens=100,
-        temperature=0
-    )
-    answer = response.choices[0].message.content
-    return answer
 
 # === GraphRAG Query Function ===
 def graph_rag_query(user_message):
@@ -268,7 +237,7 @@ def chat():
         if rag_mode == "graph":
             answer = graph_rag_query(user_message)
         else:
-            answer = vector_rag_query(user_message)
+            answer = query_vector_rag(user_message, INDEX_NAME)
         return jsonify({"answer": answer})
     except Exception as e:
         logging.error(f"Error in chat endpoint: {e}")
