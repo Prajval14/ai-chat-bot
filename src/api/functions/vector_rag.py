@@ -55,7 +55,11 @@ def create_vector_index():
     index_name = "nestledata"
     fields = [
         SimpleField(name="documentId", type=SearchFieldDataType.String, filterable=True, sortable=True, key=True),
-        SearchableField(name="content", type=SearchFieldDataType.String),
+        SearchableField(name="content", type=SearchFieldDataType.String),        
+        SimpleField(name="type", type=SearchFieldDataType.String, filterable=True),
+        SimpleField(name="chunk_id", type=SearchFieldDataType.Int32, filterable=True, sortable=True),
+        SearchableField(name="title", type=SearchFieldDataType.String),
+        SearchableField(name="url", type=SearchFieldDataType.String),
         SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), searchable=True,
                     vector_search_dimensions=1536, vector_search_configuration="my-vector-config", vector_search_profile_name="my-vector-profile")
     ]
@@ -88,11 +92,11 @@ def create_vector_index():
 
 def generate_embeddings(text):
     logger.info("Generating embeddings for chunk...")
-    response = openai_client.Embedding.create(
+    response = openai_client.embeddings.create(
         input=text,
         model="text-embedding-ada-002"
     )
-    embedding = response["data"][0]["embedding"]
+    embedding = response.data[0].embedding
     logger.info("Embeddings generated.")
     return embedding
 
@@ -105,9 +109,13 @@ def ingest_docs_to_index(chunked_blob_name, index_name):
     for doc in docs_data:
         try:
             docs.append({
-                "documentId": str(uuid.uuid4()),
-                "content": doc["content"],
-                "embedding": generate_embeddings(doc["content"])
+                    "documentId": str(uuid.uuid4()),
+                    "content": doc["content"],
+                    "embedding": generate_embeddings(doc["content"]),
+                    "type": doc.get("type", "unknown"),
+                    "chunk_id": doc.get("chunk_id", -1),
+                    "title": doc.get("title", ""),
+                    "url": doc.get("url", "")
             })
         except Exception as e:
             logger.error(f"Embedding failed for a chunk: {e}")
@@ -129,7 +137,7 @@ def query_vector_rag(query, index_name):
 
     # Step 1: Create embedding for query
     query_embedding = generate_embeddings(query)
-
+    logger.info(f"Query embedding length: {len(query_embedding)}")
     # Step 2: Search similar vectors
     vector = Vector(value=query_embedding, k=5, fields="embedding")
     results = search_client.search(
@@ -139,7 +147,9 @@ def query_vector_rag(query, index_name):
     )
     input_text = ""
     for result in results:
-        input_text += result['content'] + " "
+        logger.info(f"Retrieved doc chunk: {result['content'][:120]}") 
+        if result.get('type') == 'recipe':
+            input_text += "\n\n---\n\n" + result['content'] 
     print(f"Retrieved context:\n{input_text}\n")
     logger.info("Context chunks retrieved for query.")
 
@@ -147,13 +157,18 @@ def query_vector_rag(query, index_name):
     response = openai_client.chat.completions.create(
         model="gpt-4o-mini",
         messages=[
-            {"role": "system", "content": "You are a helpful assistant. Use ONLY the provided context to answer the question. If you cannot find the answer in the context, say: 'The answer is not in the context provided."},
+            {"role": "system", "content": (
+                "You are a helpful recipe assistant. "
+                "The context contains one or more recipes and product descriptions. "
+                "If the user asks for a recipe, find the most relevant recipe from the context and respond with the recipe title, a short summary, and the ingredients list. "
+                "If no recipe is found, say: The answer is not in the context provided."
+            )},
             {"role": "user", "content": f"Context: {input_text}\n\nQuestion: {query}"}
         ],
         max_tokens=200,
         temperature=0
     )
-    answer = response['choices'][0]['message']['content']
+    answer = response.choices[0].message.content
     logger.info(f"LLM response generated: {answer}")
     return answer
 
@@ -164,8 +179,8 @@ if __name__ == "__main__":
     index_name = create_vector_index()
     ingest_docs_to_index(CHUNKED_JSON_BLOB, index_name)
 
-    # Example query
-    user_query = "How many total brands does nestle have?"
-    answer = query_vector_rag(user_query, index_name)
-    print("Answer:", answer)
+    # # Example query
+    # user_query = "How many total brands does nestle have?"
+    # answer = query_vector_rag(user_query, index_name)
+    # print("Answer:", answer)
     logger.info("Completed full workflow.")
