@@ -4,3 +4,8 @@ python-dotenv
 azure-search-documents==11.4.0b8
 azure-storage-blob
 openai
+neo4j
+langchain
+langchain_community
+langchain_experimental
+langchain_openai
