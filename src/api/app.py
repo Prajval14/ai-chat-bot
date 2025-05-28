@@ -8,6 +8,7 @@ load_dotenv(ENV_PATH)
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from functions.vector_rag import query_vector_rag
+from functions.graph_rag import query_graph_qa
 from openai import OpenAI
 
 load_dotenv()
@@ -70,61 +71,11 @@ def run_vector_rag_indexing():
 
 def run_graph_rag_indexing():
     try:
-        from src.api.functions import graph_rag
-        graph_rag.main()
+        from functions.graph_rag import graphrag_index_from_blob
+        graphrag_index_from_blob()
         return True
     except Exception as e:
         return False
-
-def generate_embeddings(text):
-    response = openai_client.embeddings.create(
-        input=text,
-        model="text-embedding-ada-002"
-    )
-    return response.data[0].embedding
-
-def graph_rag_query(user_message):
-    try:
-        from langchain_openai import ChatOpenAI
-        from langchain_community.graphs import Neo4jGraph
-        from langchain.prompts import PromptTemplate
-        from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
-
-        llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=os.getenv("OPENAI_API_KEY"))
-        graph = Neo4jGraph(
-            url=NEO4J_URI,
-            username=NEO4J_USERNAME,
-            password=NEO4J_PASSWORD
-        )
-        schema = graph.get_schema
-
-        template = """
-        Task: Generate a Cypher statement to query the graph database.
-        Instructions:
-        Use only relationship types and properties provided in schema.
-        Do not use other relationship types or properties that are not provided.
-        schema:
-        {schema}
-        Note: Do not include explanations or apologies in your answers.
-        Do not answer questions that ask anything other than creating Cypher statements.
-        Do not include any text other than generated Cypher statements.
-        Question: {question}
-        """
-        question_prompt = PromptTemplate(
-            template=template,
-            input_variables=["schema", "question"]
-        )
-        qa = GraphCypherQAChain.from_llm(
-            llm=llm,
-            graph=graph,
-            cypher_prompt=question_prompt,
-            verbose=False,
-            allow_dangerous_requests=True
-        )
-        result = qa.invoke({"query": user_message})
-        return result['result']
-    except Exception as e:
-        return "Sorry, something went wrong with the graph-based query."
 
 @app.route("/")
 def home():
@@ -190,14 +141,19 @@ def chat():
 
     data = request.json
     user_message = data.get("message", "")
+
     try:
         if rag_mode == "graph":
-            answer = graph_rag_query(user_message)
+            from functions.graph_rag import query_graph_qa
+            answer = query_graph_qa(user_message)
         else:
+            from functions.vector_rag import query_vector_rag  # Correct file
             answer = query_vector_rag(user_message, INDEX_NAME)
         return jsonify({"answer": answer})
     except Exception as e:
-        return jsonify({"status": "error", "message": "Failed to generate answer."}), 500
+        import traceback
+        traceback.print_exc()
+        return jsonify({"status": "error", "message": str(e)}), 500
 
 if __name__ == "__main__":
     select_rag_mode()
