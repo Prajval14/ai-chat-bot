@@ -9,3 +9,4 @@ langchain
 langchain_community
 langchain_experimental
 langchain_openai
+playwright
