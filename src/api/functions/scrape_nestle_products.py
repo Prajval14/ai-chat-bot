@@ -6,6 +6,10 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
+# --- Import centralized logger ---
+from functions.log_utils import get_blob_logger
+logger = get_blob_logger(__name__)
+
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
@@ -19,15 +23,17 @@ def get_total_pages(page):
         match = re.search(r'page=(\d+)', href)
         if match:
             total_pages = int(match.group(1))
+            logger.info(f"Detected {total_pages} total pages of products.")
             return total_pages
     except Exception as e:
-        pass
+        logger.error(f"Failed to get total pages: {e}")
     return 0
 
 def get_product_urls(page):
     products = []
     anchors = page.locator('div.views-field-title a')
     count = anchors.count()
+    logger.info(f"Found {count} product anchors on the page.")
     for i in range(count):
         a = anchors.nth(i)
         url = a.get_attribute('href')
@@ -36,9 +42,11 @@ def get_product_urls(page):
             if not url.startswith("http"):
                 url = "https://www.madewithnestle.ca" + url
             products.append({"url": url, "heading": heading})
+    logger.info(f"Extracted {len(products)} products from page.")
     return products
 
 def scrape_all_product_urls():
+    logger.info("Starting product URL scraping...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -47,34 +55,41 @@ def scrape_all_product_urls():
         page = context.new_page()
         base_url = "https://www.madewithnestle.ca/search/products?t=&page="
         start_url = base_url + "0"
+        logger.info(f"Navigating to first products page: {start_url}")
         page.goto(start_url, wait_until='domcontentloaded')
         time.sleep(2)
 
         total_pages = get_total_pages(page)
         if total_pages == 0:
+            logger.warning("Could not determine total pages, defaulting to 0.")
             total_pages = 0
 
-        total_pages = min(total_pages, 0)
+        total_pages = min(total_pages, 0)  # Looks like this always sets to 0; probably you want "total_pages, 20" or similar
 
         all_products = []
         for i in range(0, total_pages + 1):
             page_url = base_url + str(i)
+            logger.info(f"Scraping page {i}: {page_url}")
             page.goto(page_url, wait_until='domcontentloaded')
             time.sleep(1)
             products = get_product_urls(page)
             all_products.extend(products)
         browser.close()
+        logger.info(f"Total products collected: {len(all_products)}")
         return all_products
 
 def extract_description(page):
     try:
         desc = page.locator('div.product-description p').first.inner_text()
+        logger.info("Extracted product description.")
         return desc.strip()
-    except:
+    except Exception:
         try:
             desc = page.locator('div.field--name-field-description p').first.inner_text()
+            logger.info("Extracted fallback product description.")
             return desc.strip()
-        except:
+        except Exception:
+            logger.warning("Failed to extract product description.")
             return None
 
 def extract_accordion_section(page, section_keyword):
@@ -87,12 +102,16 @@ def extract_accordion_section(page, section_keyword):
                 parent = h2.evaluate_handle("el => el.parentElement.parentElement")
                 content_div = parent.evaluate_handle("el => el.querySelector('.coh-accordion-tabs-content.is-active')")
                 if content_div:
+                    logger.info(f"Extracted accordion section '{section_keyword}' from active content.")
                     return content_div.evaluate("el => el.innerText")
                 nextdiv = h2.evaluate_handle("el => el.nextElementSibling")
                 if nextdiv:
+                    logger.info(f"Extracted accordion section '{section_keyword}' from next sibling.")
                     return nextdiv.evaluate("el => el.innerText")
+        logger.warning(f"Accordion section '{section_keyword}' not found.")
         return None
     except Exception as e:
+        logger.error(f"Error extracting accordion section '{section_keyword}': {e}")
         return None
 
 def extract_features_and_benefits(page):
@@ -107,9 +126,12 @@ def extract_features_and_benefits(page):
                 if nextul:
                     lis = nextul.evaluate("el => Array.from(el.querySelectorAll('li'), li => li.innerText)")
                     if lis:
+                        logger.info("Extracted features and benefits as list.")
                         return lis
+        logger.warning("Features and benefits list not found; trying fallback.")
         return extract_accordion_section(page, "Features and Benefits")
-    except:
+    except Exception as e:
+        logger.error(f"Error extracting features and benefits: {e}")
         return None
 
 def extract_nutrition_info(page):
@@ -125,6 +147,7 @@ def extract_nutrition_info(page):
                 nutrition_panel = parent
 
         if not nutrition_panel:
+            logger.warning("Nutrition information section not found.")
             return None
 
         try:
@@ -134,6 +157,7 @@ def extract_nutrition_info(page):
 
         table_wrapper = page.query_selector('.nutrients-table-wrapper')
         if not table_wrapper:
+            logger.warning("Nutrition table not found.")
             return None
 
         rows = table_wrapper.query_selector_all("div.row-depth-0, div.row-depth-1")
@@ -185,8 +209,10 @@ def extract_nutrition_info(page):
                     subparts.append(part)
                 main_str += f" [Sub-nutrients: " + "; ".join(subparts) + "]"
             lines.append(main_str)
+        logger.info("Extracted nutrition information.")
         return "\n".join(lines) if lines else None
     except Exception as e:
+        logger.error(f"Error extracting nutrition info: {e}")
         return None
 
 def extract_ingredients(page):
@@ -201,17 +227,22 @@ def extract_ingredients(page):
                 if ptag:
                     ingredients = ptag.evaluate("el => el.innerText")
                     if ingredients:
+                        logger.info("Extracted ingredients (p tag).")
                         return ingredients
                 div = h2.evaluate_handle("el => el.parentElement.querySelector('.sub-ingredients')")
                 if div:
                     ingredients = div.evaluate("el => el.innerText")
                     if ingredients:
+                        logger.info("Extracted ingredients (sub-ingredients div).")
                         return ingredients
+        logger.warning("Ingredients section not found; trying fallback.")
         return extract_accordion_section(page, "Ingredients")
-    except:
+    except Exception as e:
+        logger.error(f"Error extracting ingredients: {e}")
         return None
 
 def scrape_all_product_details(product_entries):
+    logger.info("Starting detailed product scraping...")
     results = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -222,10 +253,12 @@ def scrape_all_product_details(product_entries):
         for idx, prod in enumerate(product_entries):
             url = prod["url"]
             heading = prod["heading"]
+            logger.info(f"Scraping product {idx + 1}/{len(product_entries)}: {heading} | {url}")
             try:
                 page.goto(url, wait_until='domcontentloaded', timeout=25000)
                 time.sleep(1)
             except Exception as e:
+                logger.error(f"Failed to load product page {url}: {e}")
                 continue
 
             product = {"url": url, "heading": heading}
@@ -243,8 +276,10 @@ def scrape_all_product_details(product_entries):
             if ingred:
                 product['ingredients'] = ingred
 
+            logger.info(f"Scraped details for product: {heading}")
             results.append(product)
         browser.close()
+    logger.info(f"Completed scraping details for {len(results)} products.")
     return results
 
 def product_to_paragraph(product):
@@ -269,13 +304,19 @@ def product_to_paragraph(product):
 
 def main():
     try:
+        logger.info("Web scraping main() started.")
         products = scrape_all_product_urls()
-        products = products[:1]
+        logger.info(f"Got {len(products)} products for details scraping. Limiting to 3 for demo.")
+        products = products[:3]
         details = scrape_all_product_details(products)
+        logger.info(f"Formatting scraped products to text paragraphs.")
         paragraphs = [product_to_paragraph(prod) for prod in details]
         full_text = "".join(paragraphs)
+        logger.info(f"Uploading full product text to blob 'nestle_products.txt'.")
         blob_client.upload_blob(full_text, overwrite=True)
+        logger.info("Scraping and upload completed successfully.")
     except Exception as e:
+        logger.error(f"Fatal error in main: {e}", exc_info=True)
         raise
 
 if __name__ == "__main__":

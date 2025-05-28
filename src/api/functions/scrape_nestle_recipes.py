@@ -5,6 +5,10 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
+# --- Centralized logging ---
+from functions.log_utils import get_blob_logger
+logger = get_blob_logger(__name__)
+
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
@@ -18,33 +22,42 @@ def get_total_pages(page):
         match = re.search(r'page=(\d+)', href)
         if match:
             total_pages = int(match.group(1))
+            logger.info(f"Detected {total_pages} total pages for recipes.")
             return total_pages
     except Exception as e:
-        pass
+        logger.error(f"Error determining total recipe pages: {e}")
     return 0
 
 def get_recipe_urls(page):
     urls = []
     anchors = page.locator('div.views-field-title a')
     count = anchors.count()
+    logger.info(f"Found {count} recipe anchors on current page.")
     for i in range(count):
         url = anchors.nth(i).get_attribute('href')
         if url:
             if not url.startswith("http"):
                 url = "https://www.madewithnestle.ca" + url
             urls.append(url)
+    logger.info(f"Extracted {len(urls)} recipe URLs from page.")
     return urls
 
 def extract_text(page, selector, timeout=3000):
     try:
-        return page.locator(selector).first.inner_text(timeout=timeout).strip()
-    except:
+        val = page.locator(selector).first.inner_text(timeout=timeout).strip()
+        logger.info(f"Extracted text from selector '{selector}'.")
+        return val
+    except Exception as e:
+        logger.warning(f"Failed to extract text for selector '{selector}': {e}")
         return ""
 
 def extract_all_text(page, selector, timeout=3000):
     try:
-        return page.eval_on_selector_all(selector, "els => els.map(e => e.innerText.trim())")
-    except:
+        vals = page.eval_on_selector_all(selector, "els => els.map(e => e.innerText.trim())")
+        logger.info(f"Extracted {len(vals)} entries from selector '{selector}'.")
+        return vals
+    except Exception as e:
+        logger.warning(f"Failed to extract all text for selector '{selector}': {e}")
         return []
 
 def extract_tip(page):
@@ -56,12 +69,15 @@ def extract_tip(page):
                 parent = heading.locator('..')
                 tip = parent.locator('p.coh-paragraph').first.inner_text(timeout=2000).strip()
                 if tip:
+                    logger.info("Extracted tip for recipe.")
                     return tip
-        except:
+        except Exception:
             continue
+    logger.warning("No tip found for recipe.")
     return ""
 
 def collect_recipe_urls():
+    logger.info("Starting recipe URL collection...")
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context(
@@ -72,23 +88,28 @@ def collect_recipe_urls():
         page = context.new_page()
         base_url = "https://www.madewithnestle.ca/search/recipes?t=&page="
         start_url = base_url + "0"
+        logger.info(f"Visiting first recipe search page: {start_url}")
         page.goto(start_url, wait_until='domcontentloaded')
         time.sleep(2)
         total_pages = get_total_pages(page)
         if total_pages == 0:
+            logger.warning("Could not determine total recipe pages, defaulting to 0.")
             total_pages = 0
-        total_pages = min(total_pages, 0)
+        total_pages = min(total_pages, 0)  # Consider changing this if you want more pages
         all_urls = []
         for i in range(0, total_pages + 1):
             page_url = base_url + str(i)
+            logger.info(f"Scraping recipe listing page {i}: {page_url}")
             page.goto(page_url, wait_until='domcontentloaded')
             time.sleep(1)
             urls = get_recipe_urls(page)
             all_urls.extend(urls)
         browser.close()
+        logger.info(f"Total recipe URLs collected: {len(all_urls)}")
         return all_urls
 
 def scrape_recipe_details(urls):
+    logger.info("Starting recipe details scraping...")
     data = []
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -100,12 +121,15 @@ def scrape_recipe_details(urls):
         for idx, url in enumerate(urls):
             try:
                 recipe_page = context.new_page()
+                logger.info(f"Scraping recipe {idx+1}/{len(urls)}: {url}")
                 response = recipe_page.goto(url, wait_until='domcontentloaded', timeout=30000)
                 if hasattr(response, 'status') and response.status == 403:
+                    logger.error(f"Access forbidden (403) for recipe URL: {url}")
                     recipe_page.close()
                     continue
                 time.sleep(2)
             except Exception as e:
+                logger.error(f"Failed to load recipe page {url}: {e}")
                 continue
 
             title = extract_text(recipe_page, 'h1.coh-heading.global-recipe-title')
@@ -133,9 +157,11 @@ def scrape_recipe_details(urls):
                 "tags": tags,
                 "tip": tip
             }
+            logger.info(f"Scraped details for recipe: {title if title else url}")
             data.append(recipe_data)
             recipe_page.close()
         browser.close()
+    logger.info(f"Scraped details for {len(data)} recipes.")
     return data
 
 def recipe_to_paragraph(recipe):
@@ -170,13 +196,19 @@ def recipe_to_paragraph(recipe):
 
 def main():
     try:
+        logger.info("Recipe scraping main() started.")
         all_urls = collect_recipe_urls()
-        urls = all_urls[:1]
+        logger.info(f"Collected {len(all_urls)} recipe URLs. Limiting to 3 for demo.")
+        urls = all_urls[:3]
         recipes = scrape_recipe_details(urls)
+        logger.info(f"Formatting scraped recipes to text paragraphs.")
         paragraphs = [recipe_to_paragraph(recipe) for recipe in recipes]
         full_text = "".join(paragraphs)
+        logger.info("Uploading recipes text to blob 'nestle_recipes.txt'.")
         blob_client.upload_blob(full_text, overwrite=True)
+        logger.info("Recipe scraping and upload completed successfully.")
     except Exception as e:
+        logger.error(f"Fatal error in main: {e}", exc_info=True)
         raise
 
 if __name__ == "__main__":
