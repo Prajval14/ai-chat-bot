@@ -1,9 +1,11 @@
+# ==== Standard Library Imports ====
 import os
 import json
 import uuid
 import re
-from dotenv import load_dotenv
 
+# ==== Third-Party Imports ====
+from dotenv import load_dotenv
 from azure.core.credentials import AzureKeyCredential
 from azure.storage.blob import BlobServiceClient
 from azure.search.documents import SearchClient
@@ -20,10 +22,11 @@ from azure.search.documents.indexes.models import (
 )
 from openai import OpenAI
 
-# ---- Centralized logger ----
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
+# ==== Environment Variable Loading & Client Initialization ====
 load_dotenv()
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
@@ -32,6 +35,7 @@ AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 CHUNKED_JSON_BLOB = os.getenv("CHUNKED_JSON_BLOB", "chunked_data.json")
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
+# ==== Azure Blob Storage Utilities ====
 def download_blob_to_string(blob_name):
     logger.info(f"Downloading blob '{blob_name}' from Azure Blob Storage...")
     try:
@@ -44,25 +48,24 @@ def download_blob_to_string(blob_name):
         logger.error(f"Failed to download blob '{blob_name}': {e}")
         raise
 
+# ==== Content Extraction Utility ====
 def extract_title_url(content):
     """Extract title and URL from the chunk content string using regex."""
     title = ""
     url = ""
-    # Try to find title
     m = re.search(r"Title:([^\n]+)", content)
     if m:
         title = m.group(1).strip()
-    # Try to find product name if title is missing (for products)
     if not title:
         m2 = re.search(r"Product:([^\n]+)", content)
         if m2:
             title = m2.group(1).strip()
-    # Try to find url
     m = re.search(r"URL:\s*([^\s\n]+)", content)
     if m:
         url = m.group(1).strip()
     return title, url
 
+# ==== Azure Search Index Creation ====
 def create_vector_index():
     index_name = "nestledata"
     logger.info(f"Creating Azure Cognitive Search vector index: '{index_name}'")
@@ -73,8 +76,14 @@ def create_vector_index():
         SimpleField(name="chunk_id", type=SearchFieldDataType.Int32, filterable=True, sortable=True),
         SearchableField(name="title", type=SearchFieldDataType.String),
         SearchableField(name="url", type=SearchFieldDataType.String),
-        SearchField(name="embedding", type=SearchFieldDataType.Collection(SearchFieldDataType.Single), searchable=True,
-                    vector_search_dimensions=1536, vector_search_configuration="my-vector-config", vector_search_profile_name="my-vector-profile")
+        SearchField(
+            name="embedding",
+            type=SearchFieldDataType.Collection(SearchFieldDataType.Single),
+            searchable=True,
+            vector_search_dimensions=1536,
+            vector_search_configuration="my-vector-config",
+            vector_search_profile_name="my-vector-profile"
+        )
     ]
     vector_search = VectorSearch(
         algorithm_configurations=[
@@ -103,6 +112,7 @@ def create_vector_index():
         logger.warning(f"Index '{index_name}' may already exist or creation failed: {e}")
     return index_name
 
+# ==== Embedding Generation Utility ====
 def generate_embeddings(text):
     logger.info("Generating OpenAI embeddings for text chunk.")
     try:
@@ -117,6 +127,7 @@ def generate_embeddings(text):
         logger.error(f"Embedding generation failed: {e}")
         raise
 
+# ==== Ingestion Utility: Docs to Azure Search Index ====
 def ingest_docs_to_index(chunked_blob_name, index_name):
     logger.info(f"Ingesting documents from '{chunked_blob_name}' into Azure Search index '{index_name}'")
     try:
@@ -148,6 +159,7 @@ def ingest_docs_to_index(chunked_blob_name, index_name):
         logger.error(f"Error during document ingestion: {e}")
         raise
 
+# ==== Vector RAG Query Interface ====
 def query_vector_rag(query, index_name):
     logger.info(f"Running vector search for query: '{query}'")
     try:
@@ -199,6 +211,7 @@ def query_vector_rag(query, index_name):
         logger.error(f"Error during vector RAG query: {e}", exc_info=True)
         raise
 
+# ==== Main Entrypoint: Indexing & Ingestion ====
 def main():
     index_name = create_vector_index()
     ingest_docs_to_index(CHUNKED_JSON_BLOB, index_name)

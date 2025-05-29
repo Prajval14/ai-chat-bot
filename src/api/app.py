@@ -1,4 +1,7 @@
+# ==== Standard Library Imports ====
 import os
+
+# ==== Flask and CORS ====
 from flask import Flask, request, jsonify
 try:
     from flask_cors import CORS, cross_origin  # The typical way to import flask-cors
@@ -8,20 +11,30 @@ except ImportError:
     parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     os.sys.path.insert(0, parentdir)
     from flask_cors import CORS, cross_origin
+
+# ==== Environment Variable Management ====
 from dotenv import load_dotenv, set_key
+ENV_PATH = './.env'
+
+# ==== Azure SDK Imports ====
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
+
+# ==== OpenAI SDK Import ====
 from openai import OpenAI
 
-# --- Centralized logging ---
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
+# ==== Load Environment Variables ====
 load_dotenv()
 
+# ==== Flask App Initialization ====
 app = Flask(__name__)
 CORS(app)
 
+# ==== Global Config & Client Initialization ====
 AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
 NEO4J_URI = os.getenv("NEO4J_URI")
@@ -33,6 +46,7 @@ openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 rag_mode = None
 search_client = None
 
+# ==== Helper Functions ====
 def select_rag_mode():
     global rag_mode, search_client
     logger.info("Selecting RAG mode...")
@@ -97,11 +111,15 @@ def run_graph_rag_indexing():
         logger.error(f"Graph RAG indexing failed: {e}")
         return False
 
+# ==== API Endpoints ====
+
+## Health Check Endpoint
 @app.route("/")
 def home():
     logger.info("Health check at '/' endpoint.")
     return jsonify({"message": "Hello from your Flask backend!"})
 
+## Initialization Endpoint
 @app.route("/init", methods=["POST"])
 def init():
     select_rag_mode()
@@ -130,6 +148,7 @@ def init():
     logger.info(f"Initialization completed successfully in {rag_mode} mode.")
     return jsonify({"status": "success", "mode": rag_mode})
 
+## Bot Config Endpoints
 @app.route('/bot-config', methods=['GET'])
 def get_bot_config():
     logger.info("Received GET request for bot config.")
@@ -161,6 +180,7 @@ def edit_bot_config():
         "bot_color": color
     }), 200
 
+## Chat Endpoint
 @app.route("/chat", methods=["POST"])
 def chat():
     select_rag_mode()
@@ -186,6 +206,7 @@ def chat():
         logger.error(f"Error during chat handling: {e}", exc_info=True)
         return jsonify({"status": "error", "message": str(e)}), 500
 
+# ==== Main Entrypoint ====
 if __name__ == "__main__":
     select_rag_mode()
     if not rag_mode:

@@ -1,7 +1,12 @@
+# ==== Standard Library Imports ====
 import os
 import re
+
+# ==== Third-Party Imports ====
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
+
+# ==== LangChain & LLM-Related Imports ====
 from langchain.schema import Document
 from langchain.prompts import PromptTemplate
 from langchain_community.vectorstores import Neo4jVector
@@ -9,11 +14,11 @@ from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_community.graphs import Neo4jGraph
 from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 
-# ---- Centralized logger ----
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
-# === Block: Load environment and setup Azure Blob ===
+# ==== Environment and Azure Blob Setup ====
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
@@ -21,14 +26,14 @@ PRODUCTS_BLOB = os.getenv("NESTLE_PRODUCTS_BLOB", "nestle_products.txt")
 RECIPES_BLOB = os.getenv("NESTLE_RECIPES_BLOB", "nestle_recipes.txt")
 BLOB_SERVICE_CLIENT = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 
-# === Block: Blob file loading utility ===
+# ==== Blob File Loading Utility ====
 def load_blob_text(blob_name):
     logger.info(f"Loading blob: {blob_name}")
     blob_client = BLOB_SERVICE_CLIENT.get_blob_client(container=AZURE_BLOB_CONTAINER, blob=blob_name)
     content = blob_client.download_blob().readall().decode("utf-8")
     return content
 
-# === Block: Data parsing functions ===
+# ==== Data Parsing Functions ====
 def parse_products(raw):
     # Split at 'Product:' but keep the delimiter
     product_blocks = re.split(r"\n(?=Product: )", raw)
@@ -146,7 +151,7 @@ def parse_recipes(raw):
         recipes.append(rec)
     return recipes
 
-# === Block: Neo4j loader utilities ===
+# ==== Neo4j Loader Utilities ====
 def flatten_props(props):
     flat = {}
     for k, v in props.items():
@@ -178,7 +183,7 @@ def add_products_and_recipes_to_neo4j(graph, products, recipes):
             params={"id": rec["id"], "props": rec}
         )
 
-# === Block: Cypher QA prompt ===
+# ==== Cypher QA Prompt ====
 cypher_prompt = PromptTemplate(
     template="""
     Task: Generate a Cypher statement to query the graph database.
@@ -209,7 +214,7 @@ cypher_prompt = PromptTemplate(
     input_variables=["schema", "question"]
 )
 
-# === Block: GraphRAG main setup and indexing ===
+# ==== GraphRAG Main Setup and Indexing ====
 def main():
     neo4j_url = os.getenv("NEO4J_URL")
     neo4j_username = os.getenv("NEO4J_USERNAME")
@@ -276,7 +281,7 @@ def main():
     logger.info("GraphRAG indexing and setup complete.")
     return qa_chain
 
-# === Block: Module-level singleton for QA chain to avoid re-indexing on every question ===
+# ==== Module-Level Singleton for QA Chain ====
 _qa_chain = None
 
 def get_qa_chain():
@@ -285,7 +290,7 @@ def get_qa_chain():
         _qa_chain = main()
     return _qa_chain
 
-# === Block: Public interface for answering user queries ===
+# ==== Public Interface for Answering User Queries ====
 def query_graph_rag(question):
     logger.info(f"Received user question: {question}")
     qa_chain = get_qa_chain()
@@ -297,7 +302,7 @@ def query_graph_rag(question):
         logger.error(f"Error answering user question: {e}")
         return "Sorry, an error occurred while processing your question."
 
-# === Block: CLI for manual testing ===
+# ==== CLI for Manual Testing ====
 if __name__ == "__main__":
     logger.info("Running GraphRAG as main module.")
     qa_chain = get_qa_chain()

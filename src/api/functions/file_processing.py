@@ -1,18 +1,24 @@
+# ==== Standard Library Imports ====
 import os
 import json
+
+# ==== Third-Party Imports ====
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 
-# ---- Centralized logger ----
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
+# ==== Load Environment Variables ====
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 
+# ==== Azure Blob Client Initialization ====
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 
+# ==== Blob Storage Helper Functions ====
 def download_blob(blob_name, download_path):
     logger.info(f"Downloading blob '{blob_name}' to local path '{download_path}'.")
     try:
@@ -35,12 +41,12 @@ def upload_blob(blob_name, upload_path):
         logger.error(f"Failed to upload file '{upload_path}' to blob '{blob_name}': {e}")
         raise
 
+# ==== Chunking & Processing Helper Functions ====
 def split_by_marker(text, marker, type_):
     """Splits a text by a marker, returns a list of dicts with 'content' and 'type'."""
     parts = text.split(marker)
     chunks = []
     for i, part in enumerate(parts):
-        # Only keep substantial chunks
         part = part.strip()
         if part:
             if not part.startswith(marker):
@@ -101,6 +107,7 @@ def process_and_chunk_files(
         logger.error(f"Error in process_and_chunk_files: {e}", exc_info=True)
         raise
 
+# ==== Entrypoint Functions ====
 def main():
     return process_and_chunk_files()
 

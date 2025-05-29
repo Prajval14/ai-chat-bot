@@ -1,3 +1,4 @@
+# ==== Third-Party and Standard Library Imports ====
 from playwright.sync_api import sync_playwright
 import re
 import time
@@ -5,16 +6,18 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# ---- Centralized logger ----
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
+# ==== Environment & Azure Blob Setup ====
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob="nestle_recipes.txt")
 
+# ==== Recipe URL Scraping Utilities ====
 def get_total_pages(page):
     try:
         last_page_link = page.locator('a[title="Go to last page"]')
@@ -42,6 +45,7 @@ def get_recipe_urls(page):
     logger.info(f"Extracted {len(urls)} recipe URLs from page.")
     return urls
 
+# ==== General Extraction Utilities ====
 def extract_text(page, selector, timeout=3000):
     try:
         val = page.locator(selector).first.inner_text(timeout=timeout).strip()
@@ -76,6 +80,7 @@ def extract_tip(page):
     logger.warning("No tip found for recipe.")
     return ""
 
+# ==== Recipe URL Collection Driver ====
 def collect_recipe_urls():
     logger.info("Starting recipe URL collection...")
     with sync_playwright() as p:
@@ -108,6 +113,7 @@ def collect_recipe_urls():
         logger.info(f"Total recipe URLs collected: {len(all_urls)}")
         return all_urls
 
+# ==== Recipe Detail Extraction Driver ====
 def scrape_recipe_details(urls):
     logger.info("Starting recipe details scraping...")
     data = []
@@ -164,6 +170,7 @@ def scrape_recipe_details(urls):
     logger.info(f"Scraped details for {len(data)} recipes.")
     return data
 
+# ==== Output Formatting Utility ====
 def recipe_to_paragraph(recipe):
     lines = []
     if recipe.get('title'):
@@ -194,6 +201,7 @@ def recipe_to_paragraph(recipe):
         lines.append(f"Tip: {recipe['tip']}")
     return "\n".join(lines) + "\n\n"
 
+# ==== Main Entrypoint ====
 def main():
     try:
         logger.info("Recipe scraping main() started.")

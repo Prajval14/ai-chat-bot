@@ -1,3 +1,4 @@
+# ==== Third-Party and Standard Library Imports ====
 from playwright.sync_api import sync_playwright
 import json
 import re
@@ -6,16 +7,18 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# ---- Centralized logger ----
+# ==== Logging Utilities ====
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
+# ==== Environment & Azure Blob Setup ====
 load_dotenv()
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
 blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob="nestle_products.txt")
 
+# ==== Product URL Scraping Utilities ====
 def get_total_pages(page):
     try:
         last_page_link = page.locator('a[title="Go to last page"]')
@@ -64,7 +67,7 @@ def scrape_all_product_urls():
             logger.warning("Could not determine total pages, defaulting to 0.")
             total_pages = 0
 
-        total_pages = min(total_pages, 0)  # Looks like this always sets to 0; probably you want "total_pages, 20" or similar
+        total_pages = min(total_pages, 0)  # Looks like this always sets to 0; probably you want "min(total_pages, 20)"
 
         all_products = []
         for i in range(0, total_pages + 1):
@@ -78,6 +81,7 @@ def scrape_all_product_urls():
         logger.info(f"Total products collected: {len(all_products)}")
         return all_products
 
+# ==== Product Detail Extraction Utilities ====
 def extract_description(page):
     try:
         desc = page.locator('div.product-description p').first.inner_text()
@@ -241,6 +245,7 @@ def extract_ingredients(page):
         logger.error(f"Error extracting ingredients: {e}")
         return None
 
+# ==== Product Details Scraping Driver ====
 def scrape_all_product_details(product_entries):
     logger.info("Starting detailed product scraping...")
     results = []
@@ -282,6 +287,7 @@ def scrape_all_product_details(product_entries):
     logger.info(f"Completed scraping details for {len(results)} products.")
     return results
 
+# ==== Output Formatting Utility ====
 def product_to_paragraph(product):
     lines = []
     if product.get('heading'):
@@ -302,6 +308,7 @@ def product_to_paragraph(product):
         lines.append(f"Ingredients: {product['ingredients']}")
     return "\n".join(lines) + "\n\n"
 
+# ==== Main Entrypoint ====
 def main():
     try:
         logger.info("Web scraping main() started.")
