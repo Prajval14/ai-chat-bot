@@ -166,12 +166,11 @@ def chat():
 
     data = request.json
     user_message = data.get("message", "")
-    logger.info(f"Received chat message: {user_message}")
 
     try:
         if rag_mode == "graph":
-            from functions.graph_rag import answer_user_query
-            answer = answer_user_query(user_message)
+            from functions.graph_rag import query_graph_rag
+            answer = query_graph_rag(user_message)
         else:
             from functions.vector_rag import query_vector_rag
             answer = query_vector_rag(user_message, INDEX_NAME)

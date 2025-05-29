@@ -6,7 +6,7 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# --- Import centralized logger ---
+# ---- Centralized logger ----
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 

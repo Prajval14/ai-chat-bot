@@ -5,7 +5,7 @@ import os
 from azure.storage.blob import BlobServiceClient
 from dotenv import load_dotenv
 
-# --- Centralized logging ---
+# ---- Centralized logger ----
 from functions.log_utils import get_blob_logger
 logger = get_blob_logger(__name__)
 
@@ -167,7 +167,7 @@ def scrape_recipe_details(urls):
 def recipe_to_paragraph(recipe):
     lines = []
     if recipe.get('title'):
-        lines.append(f"Title: {recipe['title']}")
+        lines.append(f"Recipe Name: {recipe['title']}")
     if recipe.get('link'):
         lines.append(f"URL: {recipe['link']}")
     if recipe.get('description'):

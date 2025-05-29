@@ -1,205 +1,305 @@
-# graph_rag.py
-
 import os
-import json
+import re
 from dotenv import load_dotenv
 from azure.storage.blob import BlobServiceClient
 from langchain.schema import Document
-from langchain_openai import OpenAIEmbeddings, ChatOpenAI
-from langchain_community.vectorstores import Neo4jVector
-from langchain_community.graphs import Neo4jGraph
-from langchain_experimental.graph_transformers import LLMGraphTransformer
-from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 from langchain.prompts import PromptTemplate
+from langchain_community.vectorstores import Neo4jVector
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_community.graphs import Neo4jGraph
+from langchain_community.chains.graph_qa.cypher import GraphCypherQAChain
 
-# === Globals for index and QA chain ===
-VECTOR_INDEX = None
-GRAPH_QA = None
-GRAPH = None
+# ---- Centralized logger ----
+from functions.log_utils import get_blob_logger
+logger = get_blob_logger(__name__)
 
-# === Load env only once (for CLI or direct run) ===
+# === Block: Load environment and setup Azure Blob ===
 load_dotenv()
+AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
+PRODUCTS_BLOB = os.getenv("NESTLE_PRODUCTS_BLOB", "nestle_products.txt")
+RECIPES_BLOB = os.getenv("NESTLE_RECIPES_BLOB", "nestle_recipes.txt")
+BLOB_SERVICE_CLIENT = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
 
-# === Azure Blob Loader ===
-def download_blob_to_string(blob_name):
-    """Downloads a blob from Azure Blob Storage and returns its content as a string."""
-    AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
-    AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
-    blob_service_client = BlobServiceClient.from_connection_string(AZURE_STORAGE_CONNECTION_STRING)
-    blob_client = blob_service_client.get_blob_client(container=AZURE_BLOB_CONTAINER, blob=blob_name)
-    blob_data = blob_client.download_blob().readall()
-    return blob_data.decode("utf-8")
+# === Block: Blob file loading utility ===
+def load_blob_text(blob_name):
+    logger.info(f"Loading blob: {blob_name}")
+    blob_client = BLOB_SERVICE_CLIENT.get_blob_client(container=AZURE_BLOB_CONTAINER, blob=blob_name)
+    content = blob_client.download_blob().readall().decode("utf-8")
+    return content
 
-def load_chunked_documents_from_blob(blob_name):
-    """Loads chunked documents from an Azure blob and returns a list of LangChain Documents."""
-    json_str = download_blob_to_string(blob_name)
-    chunks = json.loads(json_str)
-    docs = [
-        Document(
-            page_content=chunk['content'],
-            metadata={
-                'chunk_id': chunk['chunk_id'],
-                'type': chunk.get('type', ''),
-                'title': chunk.get('title', ''),
-                'url': chunk.get('url', '')
-            }
-        ) for chunk in chunks
-    ]
-    return docs
+# === Block: Data parsing functions ===
+def parse_products(raw):
+    # Split at 'Product:' but keep the delimiter
+    product_blocks = re.split(r"\n(?=Product: )", raw)
+    products = []
+    for block in product_blocks:
+        if not block.strip() or not block.startswith("Product:"):
+            continue
+        prod = {}
+        # Basic fields
+        m = re.search(r"Product:\s*(.+)", block)
+        if m:
+            prod["name"] = m.group(1).strip()
+            prod["id"] = prod["name"]
+        m = re.search(r"URL:\s*(.+)", block)
+        if m:
+            prod["url"] = m.group(1).strip()
+        m = re.search(r"Description:\s*(.+)", block)
+        if m:
+            prod["description"] = m.group(1).strip()
+        m = re.search(r"Features and Benefits:\s*(.+)", block)
+        if m:
+            prod["features"] = m.group(1).strip()
 
-# === Indexing Function ===
-def graphrag_index_from_blob(
-    blob_name=None,
-    allowed_nodes=None,
-    allowed_relationships=None
-):
-    """
-    Ingest pre-chunked documents from Azure Blob, create entities/relationships, and build Neo4j vector index.
-    """
-    global VECTOR_INDEX, GRAPH_QA, GRAPH
+        # Nutrition
+        nutrition = {}
+        nutrition_block = re.search(r"Nutrition Information:([^\n]*)(.+?)(?=(\n\S+:|$))", block, re.S)
+        if nutrition_block:
+            nut_lines = nutrition_block.group(2).strip().split("\n")
+            for line in nut_lines:
+                key_val = re.match(r"([A-Za-z ]+):\s*([\d\.]+)\s*([a-zA-Z%]*)", line)
+                if key_val:
+                    k = key_val.group(1).strip()
+                    v = key_val.group(2).strip()
+                    u = key_val.group(3).strip()
+                    nutrition[k.lower().replace(' ', '_')] = v
+                    if u:
+                        nutrition[f"{k.lower().replace(' ', '_')}_unit"] = u
+                # Sub-nutrients (within brackets)
+                sub_match = re.search(r"\[Sub-nutrients: (.+?)\]", line)
+                if sub_match:
+                    for sub in sub_match.group(1).split(";"):
+                        sub_kv = re.match(r"([^:]+):\s*([\d\.]+)\s*([a-zA-Z%]*)", sub.strip())
+                        if sub_kv:
+                            sk = sub_kv.group(1).strip()
+                            sv = sub_kv.group(2).strip()
+                            su = sub_kv.group(3).strip()
+                            nutrition[sk.lower().replace(' ', '_')] = sv
+                            if su:
+                                nutrition[f"{sk.lower().replace(' ', '_')}_unit"] = su
+            prod.update(nutrition)
 
-    # === Load credentials ===
-    openai_api_key = os.getenv("OPENAI_API_KEY")
-    neo4j_url = os.getenv("NEO4J_URI")
+        # Ingredients (may have trailing spaces)
+        m = re.search(r"Ingredients:\s*([^\n]+)", block)
+        if m:
+            prod["ingredients"] = m.group(1).strip()
+        products.append(prod)
+    return products
+
+def parse_recipes(raw):
+    recipe_blocks = re.split(r"\n(?=Title: )", raw)
+    recipes = []
+    for block in recipe_blocks:
+        if not block.strip() or not block.startswith("Title:"):
+            continue
+        rec = {}
+        m = re.search(r"Title:\s*(.+)", block)
+        if m:
+            rec["name"] = m.group(1).strip()
+            rec["id"] = rec["name"]
+        m = re.search(r"URL:\s*(.+)", block)
+        if m:
+            rec["url"] = m.group(1).strip()
+        m = re.search(r"Description:\s*(.+)", block)
+        if m:
+            rec["description"] = m.group(1).strip()
+        m = re.search(r"Prep Time:\s*(.+)", block)
+        if m:
+            rec["prep_time"] = m.group(1).strip()
+        m = re.search(r"Cook Time:\s*(.+)", block)
+        if m:
+            rec["cook_time"] = m.group(1).strip()
+        m = re.search(r"Servings:\s*(.+)", block)
+        if m:
+            rec["servings"] = m.group(1).strip()
+
+        # Parse ingredients as multiple "- " lines
+        ingr_match = re.search(r"Ingredients:\s*((?:\n\s*-\s*.*)+)", block)
+        if ingr_match:
+            ingr_lines = ingr_match.group(1).split("\n")
+            # Remove duplicates if present (seen in your sample data)
+            ingr_set = []
+            for l in ingr_lines:
+                cleaned = l.lstrip(" -").strip()
+                if cleaned and cleaned not in ingr_set:
+                    ingr_set.append(cleaned)
+            rec["ingredients"] = ingr_set
+
+        # Instructions as numbered lines
+        instr_match = re.search(r"Instructions:\s*((?:\n\s*\d+\.\s.*)+)", block)
+        if instr_match:
+            instr_lines = instr_match.group(1).split("\n")
+            instr_set = []
+            for l in instr_lines:
+                cleaned = l.strip()
+                if cleaned and cleaned not in instr_set:
+                    instr_set.append(cleaned)
+            rec["instructions"] = instr_set
+
+        m = re.search(r"Tags:\s*(.+)", block)
+        if m:
+            rec["tags"] = [x.strip() for x in m.group(1).split(",")]
+        m = re.search(r"Tip:\s*(.+)", block)
+        if m:
+            rec["tip"] = m.group(1).strip()
+        recipes.append(rec)
+    return recipes
+
+# === Block: Neo4j loader utilities ===
+def flatten_props(props):
+    flat = {}
+    for k, v in props.items():
+        if isinstance(v, list):
+            flat[k] = "; ".join(str(x) for x in v)
+        else:
+            flat[k] = v
+    return flat
+
+def add_products_and_recipes_to_neo4j(graph, products, recipes):
+    for prod in products:
+        prod = {k: v for k, v in prod.items() if not isinstance(v, dict)}
+        prod = flatten_props(prod)
+        graph.query(
+            """
+            MERGE (p:Product {id: $id})
+            SET p += $props
+            """,
+            params={"id": prod["id"], "props": prod}
+        )
+    for rec in recipes:
+        rec = {k: v for k, v in rec.items() if not isinstance(v, dict)}
+        rec = flatten_props(rec)
+        graph.query(
+            """
+            MERGE (r:Recipe {id: $id})
+            SET r += $props
+            """,
+            params={"id": rec["id"], "props": rec}
+        )
+
+# === Block: Cypher QA prompt ===
+cypher_prompt = PromptTemplate(
+    template="""
+    Task: Generate a Cypher statement to query the graph database.
+    Instructions:
+    - Use only the exact node labels, relationship types, and property names as found in the schema below.
+    - If no relationship exists between two node types, use only their properties for filtering or matching.
+    - Do not invent or assume relationships that are not explicitly shown in the schema.
+    - For product/recipe suggestion questions (e.g., gifts, recommendations, healthy options), retrieve a list of relevant products or recipes, including their names, descriptions, and if available, image URLs and purchase/reference links.
+    - For questions about nutrition, ingredients, features, or other factual properties, retrieve the specific values and units for the requested product or recipe. If the question requests multiple facts (e.g., both calories and protein), retrieve all requested fields.
+    - For questions requesting images, photos, packaging, or visual details, retrieve the appropriate image property (e.g., `image_url`, `photo_url`, `packaging_image`, as present in schema) for the requested item.
+    - For questions requesting instructions, preparation steps, or ingredients, retrieve the corresponding instruction/step/ingredient list and, if available, supporting images.
+    - For questions about company practices, certifications, or sustainability, retrieve related summary information and any relevant links or references present in the schema.
+    - For questions where references, external URLs, or source links are relevant, always include those properties if available.
+    - When the question is about a list (e.g., "best", "top", "recommended"), retrieve multiple matching entities and sort/filter as appropriate, including their relevant details and links.
+    - For numeric questions, include the value and its unit (e.g., "grams of protein").
+    - For any query about images, always include the image property in the result set, if present in schema.
+    - When generating UNION queries, always use the same column names and order (using AS to alias as needed) for each subquery.
+    - For example:
+        RETURN r.name AS name, r.description AS description, r.url AS url
+        UNION
+        RETURN p.name AS name, p.description AS description, p.url AS url
+    Do not include explanations, apologies, or anything other than the generated Cypher statement.
+    Do not answer questions that ask for anything other than creating Cypher statements.
+    schema:
+    {schema}
+    Question: {question}
+    """,
+    input_variables=["schema", "question"]
+)
+
+# === Block: GraphRAG main setup and indexing ===
+def main():
+    neo4j_url = os.getenv("NEO4J_URL")
     neo4j_username = os.getenv("NEO4J_USERNAME")
     neo4j_password = os.getenv("NEO4J_PASSWORD")
-    if not all([openai_api_key, neo4j_url, neo4j_username, neo4j_password]):
-        raise ValueError("Missing one or more required environment variables for OpenAI or Neo4j.")
-
-    # === Init OpenAI and Neo4j connectors ===
-    embeddings = OpenAIEmbeddings(openai_api_key=openai_api_key)
-    llm = ChatOpenAI(model_name="gpt-4o-mini", openai_api_key=openai_api_key)
-
-    GRAPH = Neo4jGraph(
+    openai_api_key = os.getenv("OPENAI_API_KEY")
+    os.environ['OPENAI_API_KEY'] = openai_api_key
+    embeddings = OpenAIEmbeddings()
+    llm = ChatOpenAI(model_name="gpt-4o-mini")
+    graph = Neo4jGraph(
         url=neo4j_url,
         username=neo4j_username,
         password=neo4j_password
     )
 
-    # === Load chunked docs from Azure Blob ===
-    if not blob_name:
-        blob_name = os.getenv("CHUNKED_JSON_BLOB", "chunked_nestle.json")
-    lc_docs = load_chunked_documents_from_blob(blob_name)
+    logger.info("Clearing Neo4j database...")
+    graph.query("MATCH (n) DETACH DELETE n;")
 
-    # === (Optional) Clear existing graph ===
-    GRAPH.query("MATCH (n) DETACH DELETE n;")
+    logger.info("Loading and parsing product and recipe data from blob storage...")
+    products_raw = load_blob_text(PRODUCTS_BLOB)
+    recipes_raw = load_blob_text(RECIPES_BLOB)
+    products = parse_products(products_raw)
+    recipes = parse_recipes(recipes_raw)
+    logger.info(f"Parsed {len(products)} products and {len(recipes)} recipes.")
 
-    allowed_nodes = ["Recipe", "Product", "Ingredient"]
-    allowed_relationships = ["USES", "CONTAINS"]
+    logger.info("Loading data into Neo4j...")
+    add_products_and_recipes_to_neo4j(graph, products, recipes)
 
-    # === Transform and ingest as graph (optionally restrict schema) ===
-    transformer = LLMGraphTransformer(
-        llm=llm,
-        allowed_nodes=allowed_nodes,  # List or None
-        allowed_relationships=allowed_relationships,  # List or None
-        node_properties=True,
-        relationship_properties=True
-    )
-    graph_documents = transformer.convert_to_graph_documents(lc_docs)
-    GRAPH.add_graph_documents(graph_documents, include_source=True)
-
-    # === Create vector index on Neo4j graph ===
-    # Note: Default "Entity" node label; update if using custom allowed_nodes
-    node_label = "Entity"
-    if allowed_nodes and len(allowed_nodes) == 1:
-        node_label = allowed_nodes[0]
-
-    VECTOR_INDEX = Neo4jVector.from_existing_graph(
+    logger.info("Building Neo4j vector indices...")
+    Neo4jVector.from_existing_graph(
         embedding=embeddings,
         url=neo4j_url,
         username=neo4j_username,
         password=neo4j_password,
         database="neo4j",
-        node_label=node_label,
-        text_node_properties=["id", "text"],
+        node_label="Product",
+        text_node_properties=["name", "description", "features", "ingredients"],
         embedding_node_property="embedding",
-        index_name="vector_index",
-        keyword_index_name="entity_index",
+        index_name="vector_index_product",
+        keyword_index_name="entity_index_product",
+        search_type="hybrid"
+    )
+    Neo4jVector.from_existing_graph(
+        embedding=embeddings,
+        url=neo4j_url,
+        username=neo4j_username,
+        password=neo4j_password,
+        database="neo4j",
+        node_label="Recipe",
+        text_node_properties=["name", "description", "ingredients", "instructions", "tip"],
+        embedding_node_property="embedding",
+        index_name="vector_index_recipe",
+        keyword_index_name="entity_index_recipe",
         search_type="hybrid"
     )
 
-    # Retrieve the graph schema
-    schema = GRAPH.get_schema
-
-    # === Setup Cypher QA chain ===
-    template = """
-    Task: Generate a Cypher statement to query the graph database.
-
-    Instructions:
-    - Recipes are labeled 'Recipe', with properties like 'id', 'description', 'cookTime'.
-    - Ingredients are labeled 'Ingredient' and have a property called 'id' (e.g. id: "Olive Oil").
-    - Recipes are connected to ingredients by the 'CONTAINS' relationship.
-    - To find recipes that use an ingredient, match on (r:Recipe)-[:CONTAINS]->(i:Ingredient) where i.id contains or equals the ingredient name.
-    - Only use labels: Recipe, Ingredient.
-    - Only use relationship: CONTAINS.
-    - Use the exact property names as above.
-
-    schema:
-    {schema}
-
-    Note: Do not include explanations or apologies in your answers.
-    Only return the Cypher statement.
-
-    Question: {question}
-    """
-
-    question_prompt = PromptTemplate(
-        template=template,
-        input_variables=["schema", "question"]
-    )
-
-    GRAPH_QA = GraphCypherQAChain.from_llm(
+    logger.info("Initializing QA Chain...")
+    qa_chain = GraphCypherQAChain.from_llm(
         llm=llm,
-        graph=GRAPH,
-        cypher_prompt=question_prompt,
+        graph=graph,
+        cypher_prompt=cypher_prompt,
         verbose=True,
         allow_dangerous_requests=True
     )
+    logger.info("GraphRAG indexing and setup complete.")
+    return qa_chain
 
-    return True  # For confirmation in logs/scripts
+# === Block: Module-level singleton for QA chain to avoid re-indexing on every question ===
+_qa_chain = None
 
-# === Query Functions ===
-def query_vector_rag(user_query, top_k=3):    
-    """
-    Runs a vector search on the Neo4j vector index with the user_query and returns the top results.
-    """
-    global VECTOR_INDEX
-    if VECTOR_INDEX is None:
-        raise ValueError("Vector index not initialized. Run graphrag_index_from_blob() first.")
-    results = VECTOR_INDEX.similarity_search(user_query, k=top_k)
-    return results
+def get_qa_chain():
+    global _qa_chain
+    if _qa_chain is None:
+        _qa_chain = main()
+    return _qa_chain
 
-def query_graph_qa(user_question):
-    """
-    Runs a Cypher-based graph QA query using the LLM Cypher chain.
-    """
-    GRAPH_QA = GraphCypherQAChain.from_llm(
-        llm=llm,
-        graph=GRAPH,
-        cypher_prompt=question_prompt,
-        verbose=True,
-        allow_dangerous_requests=True
-    )
-    if GRAPH_QA is None:
-        raise ValueError("Graph QA not initialized. Run graphrag_index_from_blob() first.")
-    answer = GRAPH_QA.run(user_question)
-    return answer
+# === Block: Public interface for answering user queries ===
+def query_graph_rag(question):
+    logger.info(f"Received user question: {question}")
+    qa_chain = get_qa_chain()
+    try:
+        result = qa_chain.invoke({"query": question})["result"]
+        logger.info(f"Answer: {result}")
+        return result
+    except Exception as e:
+        logger.error(f"Error answering user question: {e}")
+        return "Sorry, an error occurred while processing your question."
 
-# === For CLI/testing: Index and Query ===
+# === Block: CLI for manual testing ===
 if __name__ == "__main__":
-    blob_name = os.getenv("CHUNKED_JSON_BLOB", "chunked_nestle.json")
-    print("Indexing data from blob:", blob_name)
-    graphrag_index_from_blob(blob_name)
-    print("Indexing complete.\n")
-
-    # Example vector search
-    print("Sample Vector Search Results:")
-    res = query_vector_rag("Which recipes use BOOST Diabetic - Strawberry?")
-    for r in res:
-        print("Chunk:", r.metadata.get("chunk_id"), "| Title:", r.metadata.get("title"))
-        print("Content:", r.page_content[:400], "...\n")
-
-    # Example graph QA
-    print("Sample Graph Cypher QA Answer:")
-    answer = query_graph_qa("Show all recipes that contain pasta.")
-    print(answer)
+    logger.info("Running GraphRAG as main module.")
+    qa_chain = get_qa_chain()
+    question = "Show me recipes or products suitable for someone looking to reduce sugar intake."
+    result = query_graph_rag(question)

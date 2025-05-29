@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import re
 from dotenv import load_dotenv
 
 from azure.core.credentials import AzureKeyCredential
@@ -28,7 +29,7 @@ AZURE_SEARCH_ENDPOINT = os.getenv("AZURE_SEARCH_ENDPOINT")
 AZURE_SEARCH_KEY = os.getenv("AZURE_SEARCH_KEY")
 AZURE_STORAGE_CONNECTION_STRING = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
 AZURE_BLOB_CONTAINER = os.getenv("AZURE_BLOB_CONTAINER", "files")
-CHUNKED_JSON_BLOB = os.getenv("CHUNKED_JSON_BLOB", "chunked_nestle.json")
+CHUNKED_JSON_BLOB = os.getenv("CHUNKED_JSON_BLOB", "chunked_data.json")
 openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def download_blob_to_string(blob_name):
@@ -42,6 +43,25 @@ def download_blob_to_string(blob_name):
     except Exception as e:
         logger.error(f"Failed to download blob '{blob_name}': {e}")
         raise
+
+def extract_title_url(content):
+    """Extract title and URL from the chunk content string using regex."""
+    title = ""
+    url = ""
+    # Try to find title
+    m = re.search(r"Title:([^\n]+)", content)
+    if m:
+        title = m.group(1).strip()
+    # Try to find product name if title is missing (for products)
+    if not title:
+        m2 = re.search(r"Product:([^\n]+)", content)
+        if m2:
+            title = m2.group(1).strip()
+    # Try to find url
+    m = re.search(r"URL:\s*([^\s\n]+)", content)
+    if m:
+        url = m.group(1).strip()
+    return title, url
 
 def create_vector_index():
     index_name = "nestledata"
@@ -105,14 +125,15 @@ def ingest_docs_to_index(chunked_blob_name, index_name):
         docs = []
         for i, doc in enumerate(docs_data):
             try:
+                title, url = extract_title_url(doc["content"])
                 docs.append({
-                        "documentId": str(uuid.uuid4()),
-                        "content": doc["content"],
-                        "embedding": generate_embeddings(doc["content"]),
-                        "type": doc.get("type", "unknown"),
-                        "chunk_id": doc.get("chunk_id", -1),
-                        "title": doc.get("title", ""),
-                        "url": doc.get("url", "")
+                    "documentId": str(uuid.uuid4()),
+                    "content": doc["content"],
+                    "embedding": generate_embeddings(doc["content"]),
+                    "type": doc.get("type", "unknown"),
+                    "chunk_id": doc.get("chunk_id", -1),
+                    "title": title,
+                    "url": url
                 })
                 logger.info(f"Document {i+1}/{len(docs_data)} embedded and prepared.")
             except Exception as e:
@@ -136,31 +157,43 @@ def query_vector_rag(query, index_name):
         results = search_client.search(
             search_text=None,
             vectors=[vector],
-            select=["content"]
+            select=["content", "title", "url"]
         )
         input_text = ""
-        count = 0
+        references = []
         for result in results:
-            if result.get('type') == 'recipe':
-                input_text += "\n\n---\n\n" + result['content']
-                count += 1
-        logger.info(f"Vector search returned {count} relevant recipes.")
+            title = result.get('title') or ""
+            url = result.get('url') or ""
+            # Format with title & url for GPT context
+            if title and url:
+                ref = f"**{title}** ([source]({url}))"
+            elif title:
+                ref = f"**{title}**"
+            else:
+                ref = url if url else ""
+            references.append(ref)
+            input_text += f"\n\n---\n\n{result['content']}"
+        # Generate GPT completion with context
         response = openai_client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o",
             messages=[
                 {"role": "system", "content": (
-                    "You are a helpful recipe assistant. "
-                    "The context contains one or more recipes and product descriptions. "
-                    "If the user asks for a recipe, find the most relevant recipe from the context and respond with the recipe title, a short summary, and the ingredients list. "
-                    "If no recipe is found, say: The answer is not in the context provided."
+                    "You are a helpful assistant. The context contains recipes and product descriptions. "
+                    "If the user asks for nutrition information (such as sugar, protein, fat, calories, etc.), find the value from the relevant product or recipe in the context and respond with the value and its source. "
+                    "If the user asks for a list of products or recipes, answer using the context provided. "
+                    "If no answer is found, say: The answer is not in the context provided."
                 )},
                 {"role": "user", "content": f"Context: {input_text}\n\nQuestion: {query}"}
             ],
-            max_tokens=200,
+            max_tokens=300,
             temperature=0
         )
         answer = response.choices[0].message.content
         logger.info("Received answer from OpenAI completion endpoint.")
+        logger.info(f"Q: {query}\nA: {answer}")
+        # Optionally append sources as references:
+        if references:
+            answer += "\n\nReferences:\n" + "\n".join([f"{i+1}. {ref}" for i, ref in enumerate(references)])
         return answer
     except Exception as e:
         logger.error(f"Error during vector RAG query: {e}", exc_info=True)
