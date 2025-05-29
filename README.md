@@ -157,6 +157,20 @@ The mode is automatically selected at backend startup based on available credent
 
 ---
 
+## Scraping Limits and Token Usage
+
+By default, scraping scripts in this project limit the number of products and recipes ingested to minimize API/token usage:
+
+products = products[:3]  # Only process first 3 products
+recipes = recipes[:3]    # Only process first 3 recipes
+total_pages = min(total_pages, 0)  # Restrict pagination
+To process all items, remove or comment out these lines in the scraping scripts.
+You may also increase the numbers or pagination limit as needed for your use case.
+
+Adjust these limits according to your API budget or testing needs.
+
+---
+
 ## Setup Instructions
 
 ### Backend Setup
