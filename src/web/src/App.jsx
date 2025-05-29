@@ -3,7 +3,7 @@ import { Routes, Route } from "react-router-dom";
 import Chatbot from "./Chatbot";
 import BotConfigSettings from "./BotConfigSettings";
 
-const API_BASE = "http://localhost:5000";
+const API_BASE = import.meta.env.VITE_API_URL;
 
 const DEFAULT_BOT_CONFIG = {
   bot_name: "NestleBot",

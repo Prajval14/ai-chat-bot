@@ -14,7 +14,7 @@ export default function Chatbot({ botName, botIcon, botColor }) {
   const [loading, setLoading] = useState(false);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
-  const apiBase = "http://127.0.0.1:5000/"
+  const apiBase = import.meta.env.VITE_API_URL
 
   useEffect(() => {
     if (open && bodyRef.current) {

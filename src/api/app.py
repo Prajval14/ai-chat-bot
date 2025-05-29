@@ -1,10 +1,14 @@
 import os
 from flask import Flask, request, jsonify
-from flask_cors import CORS
+try:
+    from flask_cors import CORS, cross_origin  # The typical way to import flask-cors
+except ImportError:
+    # Path hack allows examples to be run without installation.
+    import os
+    parentdir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    os.sys.path.insert(0, parentdir)
+    from flask_cors import CORS, cross_origin
 from dotenv import load_dotenv, set_key
-ENV_PATH = ".env"
-load_dotenv(ENV_PATH)
-
 from azure.core.credentials import AzureKeyCredential
 from azure.search.documents import SearchClient
 from openai import OpenAI
@@ -188,4 +192,4 @@ if __name__ == "__main__":
         logger.error("Failed to start Flask app due to missing RAG credentials.")
         exit(1)
     logger.info("Starting Flask app...")
-    app.run(debug=False, host="0.0.0.0")
+    app.run(debug=True, host="0.0.0.0")
