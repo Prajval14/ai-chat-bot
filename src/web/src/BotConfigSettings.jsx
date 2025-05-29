@@ -27,10 +27,9 @@ export default function BotConfigSettings({ apiBase, botConfig, onConfigUpdated 
         alert("Bot configuration updated!");
         if (typeof onConfigUpdated === "function") onConfigUpdated();
         navigate("/");
-      } 
-      // else {
-      //   alert("Failed to update config. Please try again.");
-      // }
+      } else {
+        alert("Failed to update config. Please try again.");
+      }
     } catch (err) {
       console.log(err)
       alert("Network error. Please try again.");
