@@ -14,6 +14,7 @@ except ImportError:
 
 # ==== Environment Variable Management ====
 from dotenv import load_dotenv, set_key
+ENV_PATH = './.env'
 
 # ==== Azure SDK Imports ====
 from azure.core.credentials import AzureKeyCredential
@@ -167,9 +168,9 @@ def edit_bot_config():
     os.environ['BOT_NAME'] = name
     os.environ['BOT_ICON'] = icon
     os.environ['BOT_COLOR'] = color
-    set_key('./.env', 'BOT_NAME', name)
-    set_key('./.env', 'BOT_ICON', icon)
-    set_key('./.env', 'BOT_COLOR', color)
+    set_key(ENV_PATH, 'BOT_NAME', name)
+    set_key(ENV_PATH, 'BOT_ICON', icon)
+    set_key(ENV_PATH, 'BOT_COLOR', color)
     logger.info(f"Bot config updated: name={name}, icon={icon}, color={color}")
 
     return jsonify({
