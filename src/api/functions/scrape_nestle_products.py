@@ -67,7 +67,7 @@ def scrape_all_product_urls():
             logger.warning("Could not determine total pages, defaulting to 0.")
             total_pages = 0
 
-        total_pages = min(total_pages, 0)  # Looks like this always sets to 0; probably you want "min(total_pages, 20)"
+        total_pages = min(total_pages, 0)  # Consider changing this if you want more pages
 
         all_products = []
         for i in range(0, total_pages + 1):
@@ -314,7 +314,7 @@ def main():
         logger.info("Web scraping main() started.")
         products = scrape_all_product_urls()
         logger.info(f"Got {len(products)} products for details scraping. Limiting to 3 for demo.")
-        products = products[:3]
+        products = products[:3]   # Consider changing this if you want more pages
         details = scrape_all_product_details(products)
         logger.info(f"Formatting scraped products to text paragraphs.")
         paragraphs = [product_to_paragraph(prod) for prod in details]

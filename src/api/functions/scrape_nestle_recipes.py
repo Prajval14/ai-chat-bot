@@ -207,7 +207,7 @@ def main():
         logger.info("Recipe scraping main() started.")
         all_urls = collect_recipe_urls()
         logger.info(f"Collected {len(all_urls)} recipe URLs. Limiting to 3 for demo.")
-        urls = all_urls[:3]
+        urls = all_urls[:3]  # Consider changing this if you want more pages
         recipes = scrape_recipe_details(urls)
         logger.info(f"Formatting scraped recipes to text paragraphs.")
         paragraphs = [recipe_to_paragraph(recipe) for recipe in recipes]
