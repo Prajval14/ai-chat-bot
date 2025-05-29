@@ -1,12 +1,40 @@
-flask
-flask-cors
-python-dotenv
+# Web & API
+Flask==3.1.1
+flask-cors==6.0.0
+
+# Azure SDKs
+azure-core==1.34.0
 azure-search-documents==11.4.0b8
-azure-storage-blob
-openai
-neo4j
-langchain
-langchain_community
-langchain_experimental
-langchain_openai
-playwright
+azure-storage-blob==12.25.1
+
+# Neo4j Database
+neo4j==5.28.1
+
+# OpenAI API
+openai==1.82.0
+
+# LangChain Core Libraries
+langchain-community==0.3.24
+langchain-core==0.3.62
+langchain-openai==0.3.18
+langchain-experimental==0.3.4
+langchain-text-splitters==0.3.8
+
+# Utilities
+python-dotenv==1.1.0
+requests==2.32.3
+tqdm==4.67.1
+
+# Data Serialization/Parsing
+PyYAML==6.0.2
+orjson==3.10.18
+
+# Optional: For JSON serialization/deserialization (for LangChain, OpenAI, etc.)
+dataclasses-json==0.6.7
+
+# Optional: For async tasks or scrapers 
+playwright==1.52.0
+
+# Optional: For typing & validation
+pydantic==2.11.5
+pydantic-settings==2.9.1

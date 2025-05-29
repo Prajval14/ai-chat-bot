@@ -88,13 +88,13 @@ def parse_products(raw):
     return products
 
 def parse_recipes(raw):
-    recipe_blocks = re.split(r"\n(?=Title: )", raw)
+    recipe_blocks = re.split(r"\n(?=Recipe Name: )", raw)
     recipes = []
     for block in recipe_blocks:
-        if not block.strip() or not block.startswith("Title:"):
+        if not block.strip() or not block.startswith("Recipe Name:"):
             continue
         rec = {}
-        m = re.search(r"Title:\s*(.+)", block)
+        m = re.search(r"Recipe Name:\s*(.+)", block)
         if m:
             rec["name"] = m.group(1).strip()
             rec["id"] = rec["name"]
@@ -291,7 +291,7 @@ def query_graph_rag(question):
     qa_chain = get_qa_chain()
     try:
         result = qa_chain.invoke({"query": question})["result"]
-        logger.info(f"Answer: {result}")
+        logger.info(f"Q: {question}\nA: {result}")
         return result
     except Exception as e:
         logger.error(f"Error answering user question: {e}")

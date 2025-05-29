@@ -1,4 +1,16 @@
+# Virtual environments
+venv/
 *env/
-__pycache__
-temp
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Temp files and folders
+temp/
+*.tmp
+
+# Environment variables
 .env
