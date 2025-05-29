@@ -1,26 +1,6 @@
----
-page_type: sample
-languages:
-- python
-- javascript
-- typescript
-- html
-- bicep
-products:
-- azure
-- azure-cognitive-search
-- azure-blob-storage
-- azure-app-service
-- openai
-- neo4j
-urlFragment: nestle-ai-chatbot
-name: React + Python AI Chatbot with Azure Search, Blob Storage, and Neo4j
-description: Full-stack AI chatbot with a Python (Flask) backend and React (Vite) frontend, leveraging Azure Cognitive Search, Blob Storage, OpenAI, and Neo4j for RAG capabilities.
----
+# React + Python AI Powered RAG Chatbot with Azure Cognitive Search and Neo4j Graph
 
-# React + Python AI Chatbot with Azure Search, Blob Storage, and Neo4j
-
-This sample provides a blueprint for a production-grade, Retrieval-Augmented Generation (RAG) chatbot using a Python (Flask) backend, a React (Vite) frontend, and integration with Azure Cognitive Search, Blob Storage, OpenAI, and Neo4j. The template is suitable for enterprise and research settings, and is extensible for additional cloud services.
+This project provides a blueprint for a production-grade, Retrieval-Augmented Generation (RAG) chatbot using a Python (Flask) backend, a React (Vite) frontend, and integration with Azure Cognitive Search, Blob Storage, OpenAI, and Neo4j.
 
 ---
 
@@ -120,6 +100,60 @@ Copy `.env.sample` to `.env` in the `/src/web` directory and set the following:
 Example for local development:
 VITE_API_URL=http://localhost:5000
 
+---
+
+## Bot Configuration
+
+After deployment, you can customize your bot’s appearance and identity (such as name, icon, and theme color) using the web interface:
+
+1. **Navigate to the frontend application** in your browser.  
+   - For local development:  
+     `http://localhost:5173/settings`  
+     or  
+     `http://localhost:5173` and use the navigation to access bot settings.
+
+2. **Update the bot’s name, icon, and color** in the settings form.
+
+3. **Save changes**. The backend will automatically update the configuration and persist the settings.
+
+---
+
+## Retrieval-Augmented Generation (RAG) Modes
+
+This application supports two RAG modes for answering user queries: **Vector RAG** and **Graph RAG**.  
+The mode is automatically selected at backend startup based on available credentials in your `.env` file.
+
+### What’s the Difference?
+
+- **Vector RAG (Azure Cognitive Search):**  
+  Uses Azure Cognitive Search to perform semantic search over ingested document chunks. Best suited for fast, scalable, keyword or embedding-based retrieval and Q&A over large volumes of unstructured text (such as documents or articles).
+
+- **Graph RAG (Neo4j):**  
+  Uses a Neo4j graph database to represent and query relationships between entities (such as recipes, products, ingredients). Best for complex queries that require traversing relationships, recommendations, or multi-hop reasoning.
+
+### How to Set the Mode
+
+- **To enable Graph RAG:**  
+  - Set all three of these environment variables in your backend `.env` file:
+    ```
+    NEO4J_URI={{NEO4J_URI}}
+    NEO4J_USERNAME={{NEO4J_USERNAME}}
+    NEO4J_PASSWORD={{NEO4J_PASSWORD}}
+    ```
+  - If these are set and valid, the backend will use Neo4j Graph RAG automatically.
+
+- **To enable Vector RAG:**  
+  - Set these environment variables in your backend `.env` file:
+    ```
+    AZURE_SEARCH_ENDPOINT={{AZURE_SEARCH_ENDPOINT}}
+    AZURE_SEARCH_KEY={{AZURE_SEARCH_KEY}}
+    ```
+  - The backend will use Vector RAG if Neo4j credentials are **not** provided but Azure Search credentials are.
+
+- **If neither set:**  
+  - The backend will not enable RAG and will log a warning. Please supply at least one set of valid credentials.
+
+> If both Neo4j and Azure Search credentials are provided, **Graph RAG** (Neo4j) takes precedence.
 
 ---
 
