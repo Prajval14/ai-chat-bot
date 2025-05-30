@@ -221,6 +221,6 @@ This sample uses environment variables to store all secrets and connection strin
 
 ## Reporting Issues
 
-If you encounter any issues, have suggestions, or wish to contribute, please file an issue or pull request on this repository.
+If you encounter any issues, have suggestions, or wish to contribute, please file an issue or pull request on this repository. 
 
 ---
