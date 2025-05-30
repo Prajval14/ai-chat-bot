@@ -28,17 +28,17 @@ export default function Chatbot({ botName, botIcon, botColor }) {
     }
   }, [loading, open]);
 
-  // Log chat history
-  async function logChat(loggedMessages) {
-    try {
-      await fetch(`${apiBase}/log`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ chat: loggedMessages }),
-      });
-    } catch (err) {
-      console.log(err)
-    }
+  function formatMessage(text) {
+    let formatted = text.replace(
+      /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+      '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>'
+    );
+    formatted = formatted.replace(
+      /(?<!["'>])\bhttps?:\/\/[^\s)<]+/g,
+      '<a href="$&" target="_blank" rel="noopener noreferrer">here</a>'
+    );
+    formatted = formatted.replace(/\s?\(<a[^)]+<\/a>\)/g, match => match.replace(/[()]/g, ''));
+    return formatted;
   }
 
   // Handle sending message
@@ -64,7 +64,6 @@ export default function Chatbot({ botName, botIcon, botColor }) {
       }
       const updatedMsgs = [...nextMessages, { from: "bot", text: botMsg }];
       setMessages(updatedMsgs);
-      await logChat(updatedMsgs);
     } catch (err) {
       console.log(err)
       const updatedMsgs = [
@@ -72,7 +71,6 @@ export default function Chatbot({ botName, botIcon, botColor }) {
         { from: "bot", text: "Error: Could not connect to backend." },
       ];
       setMessages(updatedMsgs);
-      await logChat(updatedMsgs);
     } finally {
       setLoading(false);
     }
@@ -116,7 +114,11 @@ export default function Chatbot({ botName, botIcon, botColor }) {
                   : {}
               }
             >
-              {msg.text}
+              {msg.from === "bot" ? (
+                <span dangerouslySetInnerHTML={{ __html: formatMessage(msg.text) }} />
+              ) : (
+                msg.text
+              )}
             </div>
           ))}
           {loading && <div className="chatbot-message bot">Thinking...</div>}
