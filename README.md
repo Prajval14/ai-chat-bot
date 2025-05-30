@@ -173,39 +173,56 @@ Adjust these limits according to your API budget or testing needs.
 
 ## Setup Instructions
 
+### Clone the Repository (First Step)
+
+```bash
+git clone https://github.com/Prajval14/ai-chat-bot.git
+```
+cd YOUR-REPO-NAME
+
 ### Backend Setup
 
-1. **Install Python dependencies:**
+1. **Navigate to the backend directory:**
+    - cd src/api
+
+2. **Install Python dependencies:**
     ```bash
     python -m venv venv
     source venv/bin/activate  # On Windows: venv\Scripts\activate
     pip install -r requirements.txt
     ```
 
-2. **Set up environment variables:**
+3. **Set up environment variables:**
     - Copy `.env.sample` to `.env`
     - Edit `.env` and fill in your Azure/OpenAI/Neo4j credentials
 
-3. **Run the backend server:**
+4. **Run the backend server:**
     ```bash
     python app.py
     ```
     By default, the backend will run at `http://localhost:5000`.
 
+5. **Navigate to the backend directory:**
+    - Visit: http://localhost:5000/init
+    - This will trigger initial scraping, ingest data to Azure Cognitive Search and Neo4j, and prepare the system for chat.
+
 ---
 
 ### Frontend Setup
 
-1. **Install Node.js dependencies:**
+1. **Navigate to the frontend directory:**
+    - cd src/web
+
+2. **Install Node.js dependencies:**
     ```bash
     npm install
     ```
 
-2. **Set up environment variables:**
+3. **Set up environment variables:**
     - Copy `.env.sample` to `.env`
     - Set `VITE_API_URL` to the backend URL (`http://localhost:5000` for local)
 
-3. **Run the frontend development server:**
+4. **Run the frontend development server:**
     ```bash
     npm run dev
     ```
