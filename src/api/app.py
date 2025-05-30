@@ -13,8 +13,10 @@ except ImportError:
     from flask_cors import CORS, cross_origin
 
 # ==== Environment Variable Management ====
-from dotenv import load_dotenv, set_key
-ENV_PATH = './.env'
+from dotenv import load_dotenv
+
+# ==== Import Config Utils ====
+from functions.config_utils import get_blob_config, upload_blob_config, ensure_blob_config, DEFAULT_CONFIG
 
 # ==== Azure SDK Imports ====
 from azure.core.credentials import AzureKeyCredential
@@ -122,6 +124,7 @@ def home():
 ## Initialization Endpoint
 @app.route("/init", methods=["POST"])
 def init():
+    ensure_blob_config()
     select_rag_mode()
     if not rag_mode:
         logger.error("No valid RAG credentials found during /init.")
@@ -150,34 +153,47 @@ def init():
 
 ## Bot Config Endpoints
 @app.route('/bot-config', methods=['GET'])
-def get_bot_config():
+def get_bot_config_endpoint():
     logger.info("Received GET request for bot config.")
-    return jsonify({
-        "bot_name": os.getenv('BOT_NAME', ''),
-        "bot_icon": os.getenv('BOT_ICON', ''),
-        "bot_color": os.getenv('BOT_COLOR', '')
-    })
+    config = get_blob_config()
+    if config is None:
+        config = DEFAULT_CONFIG
+    return jsonify(config)
 
 @app.route('/bot-config', methods=['POST'])
 def edit_bot_config():
     data = request.json
-    name = data.get('bot_name', '')
-    icon = data.get('bot_icon', '')
-    color = data.get('bot_color', '')
 
-    os.environ['BOT_NAME'] = name
-    os.environ['BOT_ICON'] = icon
-    os.environ['BOT_COLOR'] = color
-    set_key(ENV_PATH, 'BOT_NAME', name)
-    set_key(ENV_PATH, 'BOT_ICON', icon)
-    set_key(ENV_PATH, 'BOT_COLOR', color)
+    name = data.get('bot_name', '').strip()
+    icon = data.get('bot_icon', '').strip()
+    color = data.get('bot_color', '').strip()
+
+    if not name or not color:
+        logger.warning("Missing bot_name or bot_color in config update.")
+        return jsonify({
+            "status": "error",
+            "message": "Both bot_name and bot_color are required."
+        }), 400
+
+    if icon and not (icon.startswith("http://") or icon.startswith("https://")):
+        logger.warning("Invalid icon link provided.")
+        return jsonify({
+            "status": "error",
+            "message": "bot_icon must be a valid URL (starting with http:// or https://) or left empty."
+        }), 400
+
+    config = {
+        "bot_name": name,
+        "bot_icon": icon,
+        "bot_color": color
+    }
+
+    upload_blob_config(config)
     logger.info(f"Bot config updated: name={name}, icon={icon}, color={color}")
 
     return jsonify({
         "status": "success",
-        "bot_name": name,
-        "bot_icon": icon,
-        "bot_color": color
+        **config
     }), 200
 
 ## Chat Endpoint

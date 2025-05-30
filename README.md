@@ -84,11 +84,6 @@ NEO4J_URI={{NEO4J_URI}}
 NEO4J_USERNAME={{NEO4J_USERNAME}}
 NEO4J_PASSWORD={{NEO4J_PASSWORD}}
 
-BOT_NAME='NestleBot'
-BOT_ICON=''
-BOT_COLOR='#306D51'
-
-
 > Replace `{{...}}` placeholders with your actual values.
 
 ---
@@ -104,17 +99,14 @@ VITE_API_URL=http://localhost:5000
 
 ## Bot Configuration
 
-After deployment, you can customize your bot’s appearance and identity (such as name, icon, and theme color) using the web interface:
+You can fully customize your bot’s name, icon, and theme color directly from the web interface:
 
-1. **Navigate to the frontend application** in your browser.  
-   - For local development:  
-     `http://localhost:5173/settings`  
-     or  
-     `http://localhost:5173` and use the navigation to access bot settings.
+1. **Go to `/settings` in your frontend application.**
+   - For local development: [http://localhost:5173/settings](http://localhost:5173/settings)
+   - For production: `https://<your-frontend-url>/settings`
 
-2. **Update the bot’s name, icon, and color** in the settings form.
-
-3. **Save changes**. The backend will automatically update the configuration and persist the settings.
+2. **Update the bot’s name, icon URL, and color in the form and save.**
+   - Your changes are saved automatically and will persist across restarts.
 
 ---
 
