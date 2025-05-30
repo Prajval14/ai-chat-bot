@@ -14,7 +14,7 @@ export default function Chatbot({ botName, botIcon, botColor }) {
   const [loading, setLoading] = useState(false);
   const bodyRef = useRef(null);
   const inputRef = useRef(null);
-  const apiBase = import.meta.env.VITE_API_URL
+  const apiBase = "app-botdevone-api.azurewebsites.net"  //Change this url to your backend endpoint
 
   useEffect(() => {
     if (open && bodyRef.current) {
